@@ -4,9 +4,8 @@ Name                 : ProfileTenureView
 Description          : A widget for rendering a profile's social tenure
                        relationship.
 Date                 : 9/October/2016
-copyright            : (C) 2016 by UN-Habitat and implementing partners.
-                       See the accompanying file CONTRIBUTORS.txt in the root
-email                : stdm@unhabitat.org
+copyright            : John Kahiu
+email                : gkahiu at gmail dot com
  ***************************************************************************/
 
 /***************************************************************************

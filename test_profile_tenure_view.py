@@ -3,9 +3,8 @@
 Name                 : ProfileTenureViewTest
 Description          : Test for ProfileTenureView widget.
 Date                 : 10/October/2016
-copyright            : (C) 2016 by UN-Habitat and implementing partners.
-                       See the accompanying file CONTRIBUTORS.txt in the root
-email                : stdm@unhabitat.org
+copyright            : John Kahiu
+email                : gkahiu at gmail dot com
  ***************************************************************************/
 
 /***************************************************************************
