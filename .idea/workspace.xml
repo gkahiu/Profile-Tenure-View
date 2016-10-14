@@ -177,7 +177,11 @@
       <created>1476435894534</created>
       <updated>1476435894534</updated>
     </task>
-    <option name="localTasksCounter" value="4" />
+    <task id="LOCAL-00004" summary="Update .gitignore to exclude PyCharm files.">
+      <created>1476435962133</created>
+      <updated>1476435962133</updated>
+    </task>
+    <option name="localTasksCounter" value="5" />
     <servers />
   </component>
   <component name="ToolWindowManager">
