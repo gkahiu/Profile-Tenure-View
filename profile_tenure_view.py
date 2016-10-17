@@ -48,13 +48,13 @@ class BaseTenureItemRenderer(object):
     def __init__(self, **kwargs):
         self._default_header = QApplication.translate(
             'ProfileTenureView',
-            '<<not set>>'
+            'Not Defined'
         )
         self.header = self._default_header
         self.items_title = ''
         self.icon_painter = kwargs.pop('icon_painter', None)
         self.items = []
-        self.font_name = 'Franklin Gothic Book'
+        self.font_name = 'Arial Narrow'
         self._entity = None
 
         #Distance between the primary shape and its shadow
@@ -112,7 +112,7 @@ class BaseTenureItemRenderer(object):
         :return: Returns the font object used to render the header text.
         :rtype: QFont
         """
-        return QFont(self.font_name, 6, 75)
+        return QFont(self.font_name, 5, 75)
 
     @property
     def items_title_font(self):
@@ -147,6 +147,14 @@ class BaseTenureItemRenderer(object):
         """
         raise NotImplementedError
 
+    @property
+    def width(self):
+        """
+        :return: Returns the logical width of the item. This equals the
+        height since the item is a square.
+        """
+        return self._side + self.shadow_thickness
+
     def _elided_text(self, text, font_metrics, width):
         #Returns elided version of the text if greater than the width
         return font_metrics.elidedText(text, Qt.ElideRight, width)
@@ -179,7 +187,7 @@ class BaseTenureItemRenderer(object):
         )
 
         painter_pen = painter.pen()
-        painter_pen.setWidth(1)
+        painter_pen.setWidth(0)
 
         #Create shadow effect using linear gradient
         painter.setBrush(self._shadow_gradient)
@@ -219,22 +227,36 @@ class BaseTenureItemRenderer(object):
         else:
             painter.setPen(self._normal_text_color)
 
-        temp_title_brush = QBrush(self._gradient_dark)
-        painter.fillRect(header_rect, temp_title_brush)
         painter.drawText(header_rect, Qt.AlignCenter, self.header)
 
         #Draw items header
+        items_title_height = 8
         items_title_rect = QRect(
             header_start_pos,
-            header_height + 8,
+            header_height + items_title_height,
             self._side - (margin * 2),
-            8
+            7
         )
         painter.setFont(self.items_title_font)
-        painter.setPen(self._normal_text_color)
+        painter.setPen(QColor('#c3b49c'))
         items_title_brush = QBrush(self._gradient_dark)
-        painter.fillRect(items_title_rect, items_title_brush)
+        painter.setBrush(items_title_brush)
+        painter.drawRect(items_title_rect)
+
+        #Adjust left margin
+        items_title_rect.adjust(1, 0, 0, 0)
+        painter.setPen(self._normal_text_color)
         painter.drawText(items_title_rect, Qt.AlignLeft, self.items_title)
+
+        #Items listing
+        items_vertical_pos = header_height + items_title_height + 8
+        items_rect = QRect(
+            header_start_pos,
+            items_vertical_pos,
+            self._side - (margin * 2),
+            self._side - (items_vertical_pos - 4)
+        )
+        multiline_items = '\n'.join(self.items)
 
 
 class EntityRenderer(BaseTenureItemRenderer):
@@ -321,6 +343,9 @@ class ProfileTenureView(QWidget):
 
         #Set STR item renderers
         self._party_renderer = EntityRenderer()
+        self._sp_unit_renderer = EntityRenderer()
+        self._str_renderer = TenureRelationshipRenderer()
+        self._supporting_doc_renderer = TenureDocumentRenderer()
 
     @property
     def profile(self):
@@ -337,8 +362,56 @@ class ProfileTenureView(QWidget):
         :param profile: Profile object to be rendered.
         :type profile: Profile
         """
+        if profile is None:
+            return
+
         self._profile = profile
+
+        str_ent = profile.social_tenure
+
+        #Set renderer entities
+        self._party_renderer.entity = str_ent.party
+        self._sp_unit_renderer.entity = str_ent.spatial_unit
+        self._str_renderer.entity = str_ent
+        self._supporting_doc_renderer.entity = str_ent
+
         self.update()
+
+    def set_party(self, party):
+        """
+        Set the party entity.
+        :param party: Entity corresponding to a party in a profile's STR
+        relationship.
+        :type party: Entity
+        """
+        self._party_renderer.entity = party
+        self.update()
+
+    def party(self):
+        """
+        :return: Returns the entity corresponding to a party in a profile's
+        STR relationship.
+        :rtype: Entity
+        """
+        return self._party_renderer.entity
+
+    def set_spatial_unit(self, spatial_unit):
+        """
+        Set the spatial unit entity.
+        :param spatial_unit: Entity corresponding to a spatial unit in a
+        profile's STR relationship.
+        :type spatial_unit: Entity
+        """
+        self._sp_unit_renderer.entity = spatial_unit
+        self.update()
+
+    def spatial_unit(self):
+        """
+        :return: Returns the entity corresponding to a spatial unit in a
+        profile's STR relationship.
+        :rtype: Entity
+        """
+        return self._sp_unit_renderer.entity
 
     def save_tenure_view(self, path):
         """
@@ -349,6 +422,20 @@ class ProfileTenureView(QWidget):
         :rtype: bool
         """
         pass
+
+    def valid(self):
+        """
+        :return: Returns False if the respective party and spatial unit
+        entities have not been set. Otherwise True.
+        :rtype: bool
+        """
+        if self._party_renderer.entity is None:
+            return False
+
+        if self._sp_unit_renderer.entity is None:
+            return False
+
+        return True
 
     def minimumSizeHint(self):
         return QSize(320, 180)
@@ -372,7 +459,7 @@ class ProfileTenureView(QWidget):
 
         aspect_ratio = 16/9.0
 
-        #We adjust the viewport to respect the above aspect ratio
+        #We adjust the view port to respect the above aspect ratio
         adjusted_height = width * (1/aspect_ratio)
 
         if adjusted_height > height:
@@ -394,6 +481,17 @@ class ProfileTenureView(QWidget):
         #Render party entity
         painter.translate(0, 0)
         self._party_renderer.paint(self, painter, event)
+
+        #Render social tenure entity
+        #Ensure origin is in the computed from halfway line of the width
+        str_start_x = (width/2.0) - (self._str_renderer.width/2.0)
+        painter.translate(100, 0)
+        self._str_renderer.paint(self, painter, event)
+
+        #Render spatial unit entity
+        sp_pos = 94 * 2
+        painter.translate(sp_pos, 0)
+        #self._sp_unit_renderer.paint(self, painter, event)
 
         painter.restore()
 
