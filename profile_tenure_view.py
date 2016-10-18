@@ -24,6 +24,7 @@ from PyQt4.QtGui import (
     QBrush,
     QColor,
     QFont,
+    QFontMetrics,
     QGridLayout,
     QLinearGradient,
     QPainter,
@@ -53,15 +54,15 @@ class BaseTenureItemRenderer(object):
         self.header = self._default_header
         self.items_title = ''
         self.icon_painter = kwargs.pop('icon_painter', None)
-        self.items = []
-        self.font_name = 'Arial Narrow'
+        self.items = ['first_name', 'last_name', 'gender','date_of_birth', 'marital_status', 'education', 'origin', 'monthly_income']
+        self.font_name = 'Consolas'
         self._entity = None
 
         #Distance between the primary shape and its shadow
         self.shadow_thickness = 2
 
         self._side = 58
-        self._start_pos = 5
+        self._start_pos = 4
 
         #The start and stop positions match the size of the item
         stop_position = self._start_pos + self._side
@@ -95,7 +96,7 @@ class BaseTenureItemRenderer(object):
         self._brush = QBrush(self._gradient)
 
         self._text_highlight_color = QColor('#E74C3C')
-        self._text_column_color = QColor('#cc0000')
+        self._text_item_color = QColor('#CC0000')
         self._normal_text_color = Qt.black
 
     @property
@@ -120,7 +121,15 @@ class BaseTenureItemRenderer(object):
         :return: Returns the font object used to render the items header text.
         :rtype: QFont
         """
-        return QFont(self.font_name, 5)
+        return QFont(self.font_name, 4)
+
+    @property
+    def items_font(self):
+        """
+        :return: Returns the font object used to render multiline items.
+        :rtype: QFont
+        """
+        return QFont(self.font_name, 4)
 
     @property
     def entity(self):
@@ -129,6 +138,17 @@ class BaseTenureItemRenderer(object):
         :rtype: Entity
         """
         return self._entity
+
+    def auto_adjust_height(self):
+        """
+        :return: True if the height should be automatically adjusted to fit
+        the number of items specified. Otherwise, False; in this case, the
+        height is equal to the default height of the item. Items that exceed
+        the height of the items area will not be shown.
+        To be overridden by sub-classes.
+        :rtype: bool
+        """
+        return True
 
     @entity.setter
     def entity(self, entity):
@@ -155,108 +175,52 @@ class BaseTenureItemRenderer(object):
         """
         return self._side + self.shadow_thickness
 
-    def _elided_text(self, text, font_metrics, width):
+    def _elided_text(self, painter, text, width):
         #Returns elided version of the text if greater than the width
-        return font_metrics.elidedText(text, Qt.ElideRight, width)
-
-    def paint(self, widget, painter, event):
-        """
-        Performs the painting of the tenure item based on the object's
-        attributes.
-        :param widget: The calling parent widget.
-        :type widget: QWidget
-        :param painter: Painter object that has already been setup.
-        :type painter: QPainter
-        :param event: Paint event of the calling widget.
-        :type event: QPaintEvent
-        """
-        shadow_start_pos = self._start_pos + self.shadow_thickness
-
-        shadow_rect = QRect(
-            shadow_start_pos,
-            shadow_start_pos,
-            self._side,
-            self._side
-        )
-
-        item_rect = QRect(
-            self._start_pos,
-            self._start_pos,
-            self._side,
-            self._side
-        )
-
-        painter_pen = painter.pen()
-        painter_pen.setWidth(0)
-
-        #Create shadow effect using linear gradient
-        painter.setBrush(self._shadow_gradient)
-        painter.setPen(Qt.NoPen)
-        painter.drawRect(shadow_rect)
-
-        painter.setPen(painter_pen)
-        painter.setBrush(self._brush)
-
-        #Main item outline
-        painter.drawRect(item_rect)
-        line_y_pos = 12
-        painter.drawLine(
-            self._start_pos,
-            self._start_pos + line_y_pos,
-            self._start_pos + self._side,
-            self._start_pos + line_y_pos
-        )
-
         fm = painter.fontMetrics()
 
-        #Draw header text
-        margin = 1
-        header_start_pos = self._start_pos + margin
-        header_height = 10
-        header_rect = QRect(
-            header_start_pos,
-            header_start_pos,
-            self._side - (margin * 2),
-            header_height
+        return unicode(fm.elidedText(text, Qt.ElideRight, width))
+
+    def _elided_items(self, painter, width):
+        #Formats each item text to incorporate an elide if need be and
+        # return the items in a list.
+        return map(
+            lambda item: self._elided_text(painter, item, width),
+            self.items
         )
 
-        painter.setFont(self.header_font)
+    def items_size(self):
+        """
+        Computes an appropriate width and height of an items' text separated
+        by a new line.
+        :return: Returns a size object that fits the items' text in the list.
+        :rtype: QSize
+        """
+        fm = QFontMetrics(self.items_font)
 
-        if self.header == self._default_header:
-            painter.setPen(self._text_highlight_color)
-        else:
-            painter.setPen(self._normal_text_color)
+        return fm.size(Qt.TextWordWrap, '\n'.join(self.items))
 
-        painter.drawText(header_rect, Qt.AlignCenter, self.header)
+    def items_by_height(self, height, items):
+        """
+        :param height: Height in pixels in which the subset of items will fit.
+        :type height: int
+        :return: Returns a subset of items which fit the specified height.
+        :rtype: list
+        """
+        items_sub = []
 
-        #Draw items header
-        items_title_height = 8
-        items_title_rect = QRect(
-            header_start_pos,
-            header_height + items_title_height,
-            self._side - (margin * 2),
-            7
-        )
-        painter.setFont(self.items_title_font)
-        painter.setPen(QColor('#c3b49c'))
-        items_title_brush = QBrush(self._gradient_dark)
-        painter.setBrush(items_title_brush)
-        painter.drawRect(items_title_rect)
+        fm = QFontMetrics(self.items_font)
 
-        #Adjust left margin
-        items_title_rect.adjust(1, 0, 0, 0)
-        painter.setPen(self._normal_text_color)
-        painter.drawText(items_title_rect, Qt.AlignLeft, self.items_title)
+        for i in items:
+            sz = fm.size(Qt.TextWordWrap, '\n'.join(items_sub))
+            multiline_items =
 
-        #Items listing
-        items_vertical_pos = header_height + items_title_height + 8
-        items_rect = QRect(
-            header_start_pos,
-            items_vertical_pos,
-            self._side - (margin * 2),
-            self._side - (items_vertical_pos - 4)
-        )
-        multiline_items = '\n'.join(self.items)
+                items_height,
+                multiline_items
+            )
+
+        multiline_items = '\n'.join(multiline_items)
+        painter.drawText(items_rect, Qt.AlignLeft, multiline_items)
 
 
 class EntityRenderer(BaseTenureItemRenderer):
@@ -291,8 +255,13 @@ class TenureRelationshipRenderer(BaseTenureItemRenderer):
         self.items_title = u'<<{0}>>'.format(tenure_types)
         self.header = QApplication.translate(
             'ProfileTenureView',
-            'Social Tenure Relationship'
+            'Social Tenure'
         )
+        self.items = ['Tenancy', 'Ownership', 'Lease']
+
+    def auto_adjust_height(self):
+        #Base class override
+        return False
 
     def _on_set_entity(self):
         if not self._entity is None:
@@ -314,6 +283,10 @@ class TenureDocumentRenderer(BaseTenureItemRenderer):
             'ProfileTenureView',
             'Supporting Documents'
         )
+
+    def auto_adjust_height(self):
+        #Base class override
+        return False
 
     def _on_set_entity(self):
         if not self._entity is None:
@@ -441,7 +414,7 @@ class ProfileTenureView(QWidget):
         return QSize(320, 180)
 
     def sizeHint(self):
-        return QSize(480, 270)
+        return QSize(560, 315)
 
     def paintEvent(self, event):
         """
@@ -476,22 +449,24 @@ class ProfileTenureView(QWidget):
             adjusted_height
         )
 
-        painter.scale(width/240.0, height/135.0)
+        painter.setWindow(0, 0, 240, 135)
 
         #Render party entity
         painter.translate(0, 0)
         self._party_renderer.paint(self, painter, event)
 
         #Render social tenure entity
-        #Ensure origin is in the computed from halfway line of the width
-        str_start_x = (width/2.0) - (self._str_renderer.width/2.0)
-        painter.translate(100, 0)
+        #Apply a gap of 25 between items (party, STR, spatial unit)
+        painter.translate(85, 0)
         self._str_renderer.paint(self, painter, event)
 
         #Render spatial unit entity
-        sp_pos = 94 * 2
-        painter.translate(sp_pos, 0)
-        #self._sp_unit_renderer.paint(self, painter, event)
+        painter.translate(85, 0)
+        self._sp_unit_renderer.paint(self, painter, event)
+
+        #Render supporting documents entity
+        painter.translate(-85, 70)
+        self._supporting_doc_renderer.paint(self, painter, event)
 
         painter.restore()
 
