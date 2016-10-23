@@ -54,13 +54,13 @@ class BaseTenureItemRenderer(object):
         self.items_title = ''
         self.icon_painter = kwargs.pop('icon_painter', None)
         self.items = []
-        self.font_name = 'Arial Narrow'
+        self.font_name = 'Consolas'
         self._entity = None
 
         #Distance between the primary shape and its shadow
         self.shadow_thickness = 2
 
-        self._side = 58
+        self._side = 63
         self._start_pos = 5
 
         #The start and stop positions match the size of the item
@@ -112,7 +112,7 @@ class BaseTenureItemRenderer(object):
         :return: Returns the font object used to render the header text.
         :rtype: QFont
         """
-        return QFont(self.font_name, 5, 75)
+        return QFont(self.font_name, 3, 75)
 
     @property
     def items_title_font(self):
@@ -120,7 +120,7 @@ class BaseTenureItemRenderer(object):
         :return: Returns the font object used to render the items header text.
         :rtype: QFont
         """
-        return QFont(self.font_name, 5)
+        return QFont(self.font_name, 4)
 
     @property
     def entity(self):
