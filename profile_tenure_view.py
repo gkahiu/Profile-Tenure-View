@@ -18,6 +18,7 @@ email                : gkahiu at gmail dot com
  ***************************************************************************/
 """
 import sys
+import math
 
 from PyQt4.QtGui import (
     QApplication,
@@ -31,13 +32,180 @@ from PyQt4.QtGui import (
     QPaintEvent,
     QPalette,
     QPen,
+    QPolygonF,
     QWidget
 )
 from PyQt4.QtCore import (
+    QLineF,
+    QPointF,
     QRect,
     QSize,
     Qt
 )
+
+
+class ArrowItem(object):
+    """
+    Renders an arrow object (with line and arrow head) from one point to
+    another. The arrow head size can be customized by specifying the angle
+    and width of the arrow base.
+    """
+    def __init__(self, start_point, end_point, base_width=None,
+                 tip_angle=None, fill_arrow_head=False):
+        """
+        Class constructor
+        :param start_point: Arrow start point.
+        :type start_point: QPointF
+        :param end_point: Arrow end point.
+        :type end_point: QPointF
+        :param base_width: Width (in pixels) of the arrow base. If not
+        specified, it defaults to 20.0.
+        :type base_width: float
+        :param tip_angle: Angle (in radians) between the two line components
+        at the tip of the arrow. If not specified, it defaults to
+        math.radians(40.0).
+        Minimum math.radians(10.0)
+        Maximum math.radians(<90.0)
+        :type tip_angle: float
+        :param fill_arrow_head: True to close and fill the arrow head with
+        the specified pen and brush settings. Defaults to False.
+        :type fill_arrow_head: bool
+        """
+        self._start_point = start_point
+        self._end_point = end_point
+        self._line = QLineF(self._start_point, self._end_point)
+
+        self.base_width = base_width
+        if self.base_width is None:
+            self.base_width = 7
+
+        self._angle = tip_angle
+        if tip_angle is None:
+            self._angle = math.radians(50.0)
+
+        self.fill_arrow_head = fill_arrow_head
+
+        self.pen = QPen(
+            Qt.black,
+            0,
+            Qt.SolidLine,
+            Qt.RoundCap,
+            Qt.MiterJoin
+        )
+        self.brush = QBrush(Qt.black)
+
+        self._arrow_points = []
+
+    @property
+    def start_point(self):
+        """
+        :return: Returns the arrow start point.
+        :rtype: QPointF
+        """
+        return self._start_point
+
+    @property
+    def end_point(self):
+        """
+        :return: Returns the arrow end point.
+        :rtype: QPointF
+        """
+        return self._end_point
+
+    @property
+    def line(self):
+        """
+        :return: Returns the line component of the arrow.
+        :rtype: QLineF
+        """
+        return self._line
+
+    @property
+    def angle(self):
+        """
+        :return: Returns the value of the angle at the tip in radians.
+        :rtype: float
+        """
+        return self._angle
+
+    @angle.setter
+    def angle(self, angle):
+        """
+        Sets the value of the angle to be greater than or equal to
+        math.radians(10.0) and less than math.radians(90).
+        :param angle: Angle at the tip of the arrow in radians.
+        :type angle: float
+        """
+        min_angle = math.radians(10.0)
+        max_angle = math.radians(90)
+
+        if angle < min_angle:
+            self._angle = min_angle
+        elif angle > max_angle:
+            self._angle = max_angle
+        else:
+            self._angle = angle
+
+    @property
+    def arrow_points(self):
+        """
+        :return: Returns a collection of points used to draw the arrow head.
+        :rtype: list(QPointF)
+        """
+        return self._arrow_points
+
+    def paint(self, widget, painter, event):
+        """
+        Performs the painting of the arrow item.
+        :param widget: The calling parent widget.
+        :type widget: QWidget
+        :param painter: Painter object that has already been setup.
+        :type painter: QPainter
+        :param event: Paint event of the calling widget.
+        :type event: QPaintEvent
+        """
+        if self._start_point == self._end_point:
+            return
+
+        arrow_length = self._line.length()
+
+        #Setup computation parameters
+        cnt_factor = (self.base_width/2.0)/(math.tan(self._angle/2.0) * arrow_length)
+        cnt_point_delta = (self.base_width/2.0)/arrow_length
+
+        #Get arrow base along the line
+        arrow_base_x = self._end_point.x() - (self._line.dx() * cnt_factor)
+        arrow_base_y = self._end_point.y() - (self._line.dy() * cnt_factor)
+
+        #Get deltas to arrow points from centre point of arrow base
+        cnt_point_dx = -(self._line.dy() * cnt_point_delta)
+        cnt_point_dy = self._line.dx() * cnt_point_delta
+
+        #Compute absolute arrow positions
+        A1 = QPointF(arrow_base_x - cnt_point_dx, arrow_base_y - cnt_point_dy)
+        A2 = QPointF(arrow_base_x + cnt_point_dx, arrow_base_y + cnt_point_dy)
+
+        #Update arrow points
+        self._arrow_points = [A1, A2, self._end_point]
+
+        painter.save()
+
+        painter.setPen(self.pen)
+
+        painter.drawLine(self._line)
+
+        if not self.fill_arrow_head:
+            painter.drawLine(A1, self._end_point)
+            painter.drawLine(self._end_point, A2)
+
+        else:
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(self.brush)
+
+            arrow_poly = QPolygonF(self._arrow_points)
+            painter.drawPolygon(arrow_poly)
+
+        painter.restore()
 
 
 class BaseTenureItemRenderer(object):
@@ -189,16 +357,19 @@ class BaseTenureItemRenderer(object):
             self.items
         )
 
-    def items_size(self):
+    def items_size(self, items):
         """
         Computes an appropriate width and height of an items' text separated
         by a new line.
+        :param items: Iterable containing string items for which the size
+        will be computed.
+        :type items: list
         :return: Returns a size object that fits the items' text in the list.
         :rtype: QSize
         """
         fm = QFontMetrics(self.items_font)
 
-        return fm.size(Qt.TextWordWrap, '\n'.join(self.items))
+        return fm.size(Qt.TextWordWrap, '\n'.join(items))
 
     def items_by_height(self, height, items):
         """
@@ -212,9 +383,137 @@ class BaseTenureItemRenderer(object):
         fm = QFontMetrics(self.items_font)
 
         for i in items:
-            sz = fm.size(Qt.TextWordWrap, '\n'.join(items_sub))
-            multiline_items =
+            sz = self.items_size(items_sub)
+            if sz.height() > height:
+                break
 
+            items_sub.append(i)
+
+        return items_sub
+
+    def paint(self, widget, painter, event):
+        """
+        Performs the painting of the tenure item based on the object's
+        attributes.
+        :param widget: The calling parent widget.
+        :type widget: QWidget
+        :param painter: Painter object that has already been setup.
+        :type painter: QPainter
+        :param event: Paint event of the calling widget.
+        :type event: QPaintEvent
+        """
+        shadow_start_pos = self._start_pos + self.shadow_thickness
+
+        #Use height of subsections to compute the appropriate height
+        header_height = 10
+        items_title_height = 8
+        margin = 1
+
+        fixed_height = header_height + items_title_height + (6 * margin)
+
+        if self.auto_adjust_height():
+            items_height = self.items_size(self.items).height()
+            main_item_height = max(self._side, fixed_height + items_height)
+
+        else:
+            items_height = self._side - fixed_height
+            main_item_height = self._side
+
+        shadow_rect = QRect(
+            shadow_start_pos,
+            shadow_start_pos,
+            self._side,
+            main_item_height
+        )
+
+        main_item_rect = QRect(
+            self._start_pos,
+            self._start_pos,
+            self._side,
+            main_item_height
+        )
+
+        painter_pen = painter.pen()
+        painter_pen.setColor(self._normal_text_color)
+        painter_pen.setWidth(0)
+
+        #Create shadow effect using linear gradient
+        painter.setBrush(self._shadow_gradient)
+        painter.setPen(Qt.NoPen)
+        painter.drawRect(shadow_rect)
+
+        painter.setPen(painter_pen)
+        painter.setBrush(self._brush)
+
+        #Main item outline
+        painter.drawRect(main_item_rect)
+        line_y_pos = 12
+        painter.drawLine(
+            self._start_pos,
+            self._start_pos + line_y_pos,
+            self._start_pos + self._side,
+            self._start_pos + line_y_pos
+        )
+
+        #Draw header text
+        header_start_pos = self._start_pos + margin
+        header_rect = QRect(
+            header_start_pos,
+            header_start_pos,
+            self._side - (margin * 2),
+            header_height
+        )
+
+        painter.setFont(self.header_font)
+
+        if self.header == self._default_header:
+            painter.setPen(self._text_highlight_color)
+        else:
+            painter.setPen(self._normal_text_color)
+
+        elided_header = self._elided_text(
+            painter,
+            self.header,
+            header_rect.width()
+        )
+        painter.drawText(header_rect, Qt.AlignCenter, elided_header)
+
+        #Draw items header
+        items_title_rect = QRect(
+            header_start_pos,
+            header_height + items_title_height,
+            self._side - (margin * 2),
+            7
+        )
+        painter.setFont(self.items_title_font)
+        painter.setPen(QColor('#c3b49c'))
+        items_title_brush = QBrush(self._gradient_dark)
+        painter.setBrush(items_title_brush)
+        painter.drawRect(items_title_rect)
+
+        #Adjust left margin of items title
+        items_title_rect.adjust(1, 0, 0, 0)
+        painter.setPen(self._normal_text_color)
+        painter.drawText(items_title_rect, Qt.AlignLeft, self.items_title)
+
+        #Items listing
+        items_margin = 4
+        items_vertical_pos = header_height + items_title_height + 7
+        items_w = self._side - (items_margin * 2)
+        items_rect = QRect(
+            header_start_pos + items_margin,
+            items_vertical_pos,
+            items_w,
+            items_height + (margin * 2)
+        )
+
+        painter.setFont(self.items_font)
+        painter.setPen(self._text_item_color)
+        multiline_items = self._elided_items(painter, items_w)
+
+        #If auto-adjust is disabled then extract subset that will fit
+        if not self.auto_adjust_height():
+            multiline_items = self.items_by_height(
                 items_height,
                 multiline_items
             )
@@ -455,8 +754,11 @@ class ProfileTenureView(QWidget):
         painter.translate(0, 0)
         self._party_renderer.paint(self, painter, event)
 
+        arrow = ArrowItem(QPointF(62.0,30.0), QPointF(89.0,30.0), fill_arrow_head=True)
+        arrow.paint(self, painter, event)
+
         #Render social tenure entity
-        #Apply a gap of 25 between items (party, STR, spatial unit)
+        #Apply a gap of 25 pixels between items (party, STR, spatial unit)
         painter.translate(85, 0)
         self._str_renderer.paint(self, painter, event)
 
