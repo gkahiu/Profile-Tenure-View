@@ -219,6 +219,124 @@ class ArrowItem(object):
         painter.restore()
 
 
+class BaseIconRender(object):
+    """Renders an icon on the tenure item's header section. This icon can be
+    can be used to visually depict the nature of the context of the tenure
+    item. See bounding_rect function for positioning of the icon in the
+    tenure item. This is an abstract class and needs to be sub-classed for
+    custom renderers."""
+    def __init__(self):
+        #Icon area is 20px by 20px
+        self.upper_left = QPointF(140.5, 14.0)
+        self.bottom_right = QPointF(160.5, 34.0)
+
+    def bounding_rect(self):
+        """
+        :return: Returns the bounds of the icon and does not factor in the
+        pen width.
+        :rtype: QRectF
+        """
+        return QRectF(self.upper_left, self.bottom_right)
+
+    @property
+    def width(self):
+        """
+        :return: Returns the width of the icon plane area.
+        :rtype: float
+        """
+        return self.bottom_right.x() - self.upper_left.x()
+
+    @property
+    def height(self):
+        """
+        :return: Returns the height of the icon plane area.
+        :rtype: float
+        """
+        return self.bottom_right.y() - self.upper_left.y()
+
+    @property
+    def pen(self):
+        """
+        :return: Returns a default pen for use in the renderer's painter.
+        :rtype: QPen
+        """
+        return QPen(Qt.black, 1.0, Qt.SolidLine, Qt.SquareCap, Qt.MiterJoin)
+
+    def draw(self, painter, item):
+        """
+        Custom code for rendering the icon. To be implemented by subclasses.
+        :param painter: Painter object
+        :type painter: QPainter
+        :param item: Tenure item object.
+        :type item: BaseTenureItem
+        """
+        raise NotImplementedError
+
+
+class EntityIconRenderer(BaseIconRender):
+    """Renderer for an icon depicting a data table."""
+
+    def draw(self, p, item):
+        #Save painter state
+        p.save()
+
+        p.setPen(self.pen)
+
+        #Draw outline
+        #Define gradient
+        grad = QLinearGradient(self.upper_left, self.bottom_right)
+        grad.setColorAt(0.0, Qt.white)
+        grad.setColorAt(0.65, QColor('#D2F6FC'))
+        grad.setColorAt(1.0, QColor('#50E3FC'))
+
+        grad_bush = QBrush(grad)
+        p.setBrush(grad_bush)
+        p.drawRect(self.bounding_rect())
+
+        #Draw column header
+        cols_header_rect = QRectF(
+            self.upper_left.x() + 0.5,
+            self.upper_left.y() + 0.5,
+            self.width - 1.0,
+            3.5
+        )
+        p.setBrush(QColor('#1399FC'))
+        p.setPen(Qt.NoPen)
+        p.drawRect(cols_header_rect)
+
+        #Draw vertical column separator
+        v_start_point = self.upper_left + QPointF(10.0, 0)
+        v_end_point = self.upper_left + QPointF(10.0, 20.0)
+        col_vertical_sep = QLineF(v_start_point, v_end_point)
+        p.setPen(self.pen)
+        p.drawLine(col_vertical_sep)
+
+        #Draw horizontal separators
+        h1_start_point = self.upper_left + QPointF(0, 4.0)
+        h1_end_point = self.upper_left + QPointF(self.width, 4.0)
+        h1_sep = QLineF(h1_start_point, h1_end_point)
+        p.drawLine(h1_sep)
+
+        h_col_pen = QPen(self.pen)
+        h_col_pen.setColor(QColor('#32A7BB'))
+        p.setPen(h_col_pen)
+
+        delta_v = 16 / 3.0
+        y = 4.0 + delta_v
+
+        for i in range(2):
+            h_start_point = self.upper_left + QPointF(1.0, y)
+            h_end_point = self.upper_left + QPointF(self.width - 1.0, y)
+            h_sep = QLineF(h_start_point, h_end_point)
+
+            y += delta_v
+
+            p.drawLine(h_sep)
+
+
+        p.restore()
+
+
 class BaseTenureItem(QGraphicsItem):
     """Abstract class that provides core functionality for rendering entity and
     social tenure relationship objects corresponding to the entities in a
@@ -228,6 +346,9 @@ class BaseTenureItem(QGraphicsItem):
     def __init__(self, parent=None, scene=None, **kwargs):
         super(BaseTenureItem, self).__init__(parent, scene)
         self.setFlag(QGraphicsItem.ItemIsMovable)
+
+        #Renderer for header icon
+        self.icon_renderer = kwargs.get('icon_renderer', None)
 
         self.pen = QPen(
             Qt.black,
@@ -464,7 +585,7 @@ class BaseTenureItem(QGraphicsItem):
     def draw_text(self, painter, text, font, bounds, alignment=Qt.AlignCenter):
         """
         Provides a device independent mechanism for rendering fonts
-        regardless of te device's resolution. By default, the text will be
+        regardless of the device's resolution. By default, the text will be
         centred. This is a workaround for the font scaling issue for devices
         with different resolutions.
         :param painter: Painter object.
@@ -532,7 +653,8 @@ class BaseTenureItem(QGraphicsItem):
         shadow_start_pos = self._start_pos + self.shadow_thickness
 
         #Use height of subsections to compute the appropriate height
-        header_height = self._font_height(self.header_font, self.header)
+        header_height = self._font_height(self.header_font, self.header) + 7
+
         items_title_height = self._font_height(
             self.items_title_font,
             self.items_title
@@ -595,6 +717,17 @@ class BaseTenureItem(QGraphicsItem):
             self._side - (margin * 2),
             header_height
         )
+
+        #Adjust header text area if there is an icon renderer
+        if not self.icon_renderer is None:
+            init_width = header_rect.width()
+            adj_width = init_width - (self.icon_renderer.width + 4)
+            header_rect.setWidth(adj_width)
+
+        #Draw header icon if renderer is available
+        if not self.icon_renderer is None:
+            if isinstance(self.icon_renderer, BaseIconRender):
+                self.icon_renderer.draw(painter, self)
 
         painter.setFont(self.header_font)
 
@@ -665,7 +798,7 @@ class BaseTenureItem(QGraphicsItem):
                 multiline_items,
                 self.items_font,
                 items_rect,
-                Qt.AlignLeft|Qt.AlignTop
+                Qt.AlignLeft | Qt.AlignTop
             )
 
 
@@ -683,6 +816,10 @@ class EntityItem(BaseTenureItem):
             'columns'
         )
         self.items_title = u'<<{0}>>'.format(columns)
+
+        #Use default renderer if none is specified
+        if self.icon_renderer is None:
+            self.icon_renderer = EntityIconRenderer()
 
     def type(self):
         return EntityItem.Type
@@ -711,8 +848,6 @@ class TenureRelationshipItem(BaseTenureItem):
             'ProfileTenureView',
             'Social Tenure'
         )
-
-        self.items = ['Ownership', 'Tenancy', 'Farming Rights']
 
     def type(self):
         return TenureRelationshipItem.Type
@@ -913,7 +1048,7 @@ class ProfileTenureView(QGraphicsView):
         img = QImage(int(width), int(height), QImage.Format_ARGB32)
         img.setDotsPerMeterX(int(dpm))
         img.setDotsPerMeterY(int(dpm))
-        img.fill(Qt.white)
+        img.fill(Qt.transparent)
 
         painter = QPainter(img)
         painter.setRenderHint(QPainter.Antialiasing)

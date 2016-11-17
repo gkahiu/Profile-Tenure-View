@@ -132,51 +132,38 @@ class RectItem(QGraphicsRectItem):
         font = QFont('Consolas', 12, 75)
         painter.setFont(font)
 
-        '''
-        #FontPaintingUtil.draw_text(painter,text_rect, 'Rectangle', font)
-        #painter.drawText(text_rect, Qt.AlignCenter, 'Rectangle')
-
-        #UsingQTextLayout
-        layout = QTextLayout('Rectangle', font)
-        layout.beginLayout()
-        while layout.createLine().isValid():
-            pass
-        layout.endLayout()
-
-        y = 0
-        max_width = 0
-
-        #Set line position
-        for i in range(layout.lineCount()):
-            line = layout.lineAt(i)
-            max_width = max(max_width, line.naturalTextWidth())
-            line.setPosition(QPointF(0, y))
-            y += line.height()
-
-        pen = QPen(
-            Qt.black,
-            1,
-            Qt.SolidLine,
-            Qt.RoundCap,
-            Qt.RoundJoin
-        )
+        #Render icon
+        #Outline
+        pen = QPen(Qt.black, 1.0, Qt.SolidLine, Qt.SquareCap, Qt.MiterJoin)
         painter.setPen(pen)
+        rect = QRectF(16.0, 16.0, 16.0, 16.0) #Prop including width and height, start point
 
-        #Apply pen in text format
-        fr = QTextLayout.FormatRange()
-        fr.start = 0
-        fr.length = len(layout.text())
-        fr.format.setTextOutline(pen)
-        layout.setAdditionalFormats([fr])
+        #Add gradient
+        grad = QLinearGradient(16, 16, 32, 32)
+        grad.setColorAt(0.0, Qt.white)
+        grad.setColorAt(0.7, QColor('#D2F6FC'))
+        grad.setColorAt(1.0, QColor('#50E3FC'))
 
-        painter.drawRect(QRectF(12, 12, 114, 40))
+        main_brush = QBrush(grad)
+        painter.setBrush(main_brush)
 
-        start_x = 12 + (114 - max_width) / 2.0
-        start_y = 12 + (40 - y) / 2.0
+        painter.drawRect(rect)
 
-        #Draw text
-        layout.draw(painter, QPointF(start_x, start_y))
-        '''
+        #Draw columns highlight
+        cols_header_rect = QRectF(17, 17, 14, 3.5)
+        painter.setBrush(QColor('#1399FC'))
+        painter.setPen(Qt.NoPen)
+        painter.drawRect(cols_header_rect)
+
+        #Draw column separator
+        col_vertical_sep = QLineF(QPointF(24, 16), QPointF(24, 32))
+        painter.setPen(pen)
+        painter.drawLine(col_vertical_sep)
+
+        col_sep_1 = QLineF(QPointF(16.5, 23.5), QPointF(31.5, 23.5))
+        col_sep_2 = QLineF(QPointF(16.5, 27.5), QPointF(31.5, 27.5))
+        painter.drawLine(col_sep_1)
+        painter.drawLine(col_sep_2)
 
 
 class ProfileTenureView(QGraphicsView):
