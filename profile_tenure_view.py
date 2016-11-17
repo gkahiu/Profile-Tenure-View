@@ -448,7 +448,7 @@ class BaseTenureItem(QGraphicsItem):
         :return: Returns the font object used to render the header text.
         :rtype: QFont
         """
-        return QFont(self.font_name, 12, 63)
+        return QFont(self.font_name, 13, 63)
 
     @property
     def items_title_font(self):
@@ -1020,11 +1020,14 @@ class ProfileTenureView(QGraphicsView):
 
         return True, ''
 
-    def image(self, resolution):
+    def image(self, resolution, background=Qt.white):
         """
         Renders the view onto a QImage object.
         :param resolution: Resolution of the image in dpi.
         :type resolution: int
+        :param background: Set background color of the image. Default is a
+        white background.
+        :type background: QColor
         :return: Returns a QImage object corresponding to the profile STR
         view.
         :rtype: QImage
@@ -1048,7 +1051,7 @@ class ProfileTenureView(QGraphicsView):
         img = QImage(int(width), int(height), QImage.Format_ARGB32)
         img.setDotsPerMeterX(int(dpm))
         img.setDotsPerMeterY(int(dpm))
-        img.fill(Qt.transparent)
+        img.fill(background)
 
         painter = QPainter(img)
         painter.setRenderHint(QPainter.Antialiasing)
@@ -1085,7 +1088,7 @@ if __name__ == '__main__':
     tenure_view = ProfileTenureView()
 
     #Test image
-    p = 'D:/Temp/STR_Image.png'
+    p = 'D:/Temp/Dev/Images/STR_Image.png'
     status, msg = tenure_view.save_image_to_file(p, 300)
 
     layout = QGridLayout()
