@@ -26,19 +26,30 @@ from PyQt4.QtGui import (
     QColor,
     QFont,
     QFontMetrics,
+    QGraphicsItem,
+    QGraphicsRectItem,
+    QGraphicsScene,
+    QGraphicsView,
     QGridLayout,
+    QImage,
     QLinearGradient,
     QPainter,
+    QPainterPath,
     QPaintEvent,
     QPalette,
     QPen,
     QPolygonF,
+    QTextLayout,
     QWidget
 )
 from PyQt4.QtCore import (
+    QChar,
+    QFile,
+    QIODevice,
     QLineF,
     QPointF,
     QRect,
+    QRectF,
     QSize,
     Qt
 )
@@ -208,13 +219,25 @@ class ArrowItem(object):
         painter.restore()
 
 
-class BaseTenureItemRenderer(object):
-    """
-    Abstract class that provides core functionality for rendering entity and
+class BaseTenureItem(QGraphicsItem):
+    """Abstract class that provides core functionality for rendering entity and
     social tenure relationship objects corresponding to the entities in a
-    given profile.
-    """
-    def __init__(self, **kwargs):
+    given profile."""
+    Type = QGraphicsItem.UserType + 1
+
+    def __init__(self, parent=None, scene=None, **kwargs):
+        super(BaseTenureItem, self).__init__(parent, scene)
+        self.setFlag(QGraphicsItem.ItemIsMovable)
+
+        self.pen = QPen(
+            Qt.black,
+            0.9,
+            Qt.SolidLine,
+            Qt.RoundCap,
+            Qt.RoundJoin
+        )
+
+        #Display properties
         self._default_header = QApplication.translate(
             'ProfileTenureView',
             'Not Defined'
@@ -222,15 +245,16 @@ class BaseTenureItemRenderer(object):
         self.header = self._default_header
         self.items_title = ''
         self.icon_painter = kwargs.pop('icon_painter', None)
-        self.items = ['first_name', 'last_name', 'gender','date_of_birth', 'marital_status', 'education', 'origin', 'monthly_income']
+        self.items = []
         self.font_name = 'Consolas'
         self._entity = None
 
         #Distance between the primary shape and its shadow
-        self.shadow_thickness = 2
+        self.shadow_thickness = 4
 
-        self._side = 58
-        self._start_pos = 4
+        self._side = 156
+        self._height = self._side
+        self._start_pos = 10
 
         #The start and stop positions match the size of the item
         stop_position = self._start_pos + self._side
@@ -267,6 +291,28 @@ class BaseTenureItemRenderer(object):
         self._text_item_color = QColor('#CC0000')
         self._normal_text_color = Qt.black
 
+    def type(self):
+        return BaseTenureItem.Type
+
+    def boundingRect(self):
+        extra = self.pen.widthF() / 2.0
+
+        return QRectF(
+            self._start_pos - extra,
+            self._start_pos - extra,
+            self.width + self.shadow_thickness + extra,
+            self.height + self.shadow_thickness + extra
+        )
+
+    def invalidate(self):
+        """
+        Reset the title and items.
+        """
+        self.header = self._default_header
+        self.items = []
+
+        self.update()
+
     @property
     def brush(self):
         """
@@ -281,7 +327,7 @@ class BaseTenureItemRenderer(object):
         :return: Returns the font object used to render the header text.
         :rtype: QFont
         """
-        return QFont(self.font_name, 5, 75)
+        return QFont(self.font_name, 12, 63)
 
     @property
     def items_title_font(self):
@@ -289,7 +335,7 @@ class BaseTenureItemRenderer(object):
         :return: Returns the font object used to render the items header text.
         :rtype: QFont
         """
-        return QFont(self.font_name, 4)
+        return QFont(self.font_name, 10)
 
     @property
     def items_font(self):
@@ -297,7 +343,7 @@ class BaseTenureItemRenderer(object):
         :return: Returns the font object used to render multiline items.
         :rtype: QFont
         """
-        return QFont(self.font_name, 4)
+        return QFont(self.font_name, 9)
 
     @property
     def entity(self):
@@ -338,22 +384,32 @@ class BaseTenureItemRenderer(object):
     @property
     def width(self):
         """
-        :return: Returns the logical width of the item. This equals the
-        height since the item is a square.
+        :return: Returns the logical width of the item.
+        :rtype: float
         """
-        return self._side + self.shadow_thickness
+        return float(self._side + self.shadow_thickness)
 
-    def _elided_text(self, painter, text, width):
+    @property
+    def height(self):
+        """
+        :return: Returns the logical height of the item. If
+        auto_adjust_height is True then the height will be automatically
+        adjusted to match number of items, else it will be equal to the width
+        of the item.
+        """
+        return float(self._height + self.shadow_thickness)
+
+    def _elided_text(self, font, text, width):
         #Returns elided version of the text if greater than the width
-        fm = painter.fontMetrics()
+        fm = QFontMetrics(font)
 
         return unicode(fm.elidedText(text, Qt.ElideRight, width))
 
-    def _elided_items(self, painter, width):
+    def _elided_items(self, font, width):
         #Formats each item text to incorporate an elide if need be and
         # return the items in a list.
         return map(
-            lambda item: self._elided_text(painter, item, width),
+            lambda item: self._elided_text(font, item, width),
             self.items
         )
 
@@ -391,33 +447,109 @@ class BaseTenureItemRenderer(object):
 
         return items_sub
 
-    def paint(self, widget, painter, event):
+    def _font_height(self, font, text):
+        """
+        Computes the height for the given font object.
+        :param font: Font object.
+        :type font: QFont
+        :param text: Text
+        :type text: str
+        :return: Returns the minimum height for the given font object.
+        :rtype: int
+        """
+        fm = QFontMetrics(font)
+
+        return fm.size(Qt.TextSingleLine, text).height()
+
+    def draw_text(self, painter, text, font, bounds, alignment=Qt.AlignCenter):
+        """
+        Provides a device independent mechanism for rendering fonts
+        regardless of te device's resolution. By default, the text will be
+        centred. This is a workaround for the font scaling issue for devices
+        with different resolutions.
+        :param painter: Painter object.
+        :type painter: QPainter
+        :param text: Text to be rendered.
+        :type text: str
+        :param font: Font for rendering the text.
+        :type font: QFont
+        :param bounds: Rect object which will provide the reference point for
+        drawing the text.
+        :type bounds: QRectF
+        :param alignment: Qt enums used to describe alignment. AlignCenter is
+        the default. Accepts bitwise OR for horizontal and vertical flags.
+        :type alignment: int
+        """
+        layout = QTextLayout(text, font)
+
+        layout.beginLayout()
+        #Create the required number of lines in the layout
+        while layout.createLine().isValid():
+            pass
+        layout.endLayout()
+
+        y = 0
+        max_width = 0
+
+        #Set line positions relative to the layout
+        for i in range(layout.lineCount()):
+            line = layout.lineAt(i)
+            max_width = max(max_width, line.naturalTextWidth())
+            line.setPosition(QPointF(0, y))
+            y += line.height()
+
+        #Defaults
+        start_x = bounds.left()
+        start_y = bounds.top()
+
+        #Horizontal flags
+        if (alignment & Qt.AlignLeft) == Qt.AlignLeft:
+            start_x = bounds.left()
+        elif (alignment & Qt.AlignCenter) == Qt.AlignCenter or \
+                        (alignment & Qt.AlignHCenter) == Qt.AlignHCenter:
+            start_x = bounds.left() + (bounds.width() - max_width) / 2.0
+
+        #Vertical flags
+        if (alignment == Qt.AlignTop) == Qt.AlignTop:
+            start_y = bounds.top()
+        elif (alignment & Qt.AlignCenter) == Qt.AlignCenter or \
+                        (alignment & Qt.AlignVCenter) == Qt.AlignVCenter:
+            start_y = bounds.top() + (bounds.height() - y) / 2.0
+
+        layout.draw(painter, QPointF(start_x, start_y))
+
+    def paint(self, painter, option, widget=None):
         """
         Performs the painting of the tenure item based on the object's
         attributes.
-        :param widget: The calling parent widget.
-        :type widget: QWidget
-        :param painter: Painter object that has already been setup.
+        :param painter: Performs painting operation on the item.
         :type painter: QPainter
-        :param event: Paint event of the calling widget.
-        :type event: QPaintEvent
+        :param option: Provides style option for the item.
+        :type option: QStyleOptionGraphicsItem
+        :param widget: Provides points to the widget that is being painted on.
+        :type widget: QWidget
         """
         shadow_start_pos = self._start_pos + self.shadow_thickness
 
         #Use height of subsections to compute the appropriate height
-        header_height = 10
-        items_title_height = 8
+        header_height = self._font_height(self.header_font, self.header)
+        items_title_height = self._font_height(
+            self.items_title_font,
+            self.items_title
+        )
         margin = 1
 
         fixed_height = header_height + items_title_height + (6 * margin)
 
         if self.auto_adjust_height():
-            items_height = self.items_size(self.items).height()
+            items_height = self.items_size(self.items).height() + 2
             main_item_height = max(self._side, fixed_height + items_height)
 
         else:
             items_height = self._side - fixed_height
             main_item_height = self._side
+
+        self._height = main_item_height
 
         shadow_rect = QRect(
             shadow_start_pos,
@@ -442,12 +574,12 @@ class BaseTenureItemRenderer(object):
         painter.setPen(Qt.NoPen)
         painter.drawRect(shadow_rect)
 
-        painter.setPen(painter_pen)
+        painter.setPen(self.pen)
         painter.setBrush(self._brush)
 
         #Main item outline
         painter.drawRect(main_item_rect)
-        line_y_pos = 12
+        line_y_pos = header_height + margin * 2
         painter.drawLine(
             self._start_pos,
             self._start_pos + line_y_pos,
@@ -472,18 +604,19 @@ class BaseTenureItemRenderer(object):
             painter.setPen(self._normal_text_color)
 
         elided_header = self._elided_text(
-            painter,
+            self.header_font,
             self.header,
             header_rect.width()
         )
-        painter.drawText(header_rect, Qt.AlignCenter, elided_header)
+        #print elided_header
+        self.draw_text(painter, elided_header, self.header_font, header_rect)
 
         #Draw items header
         items_title_rect = QRect(
-            header_start_pos,
-            header_height + items_title_height,
-            self._side - (margin * 2),
-            7
+            header_start_pos + 1,
+            header_height + items_title_height - 1,
+            self._side - (margin * 4),
+            items_title_height
         )
         painter.setFont(self.items_title_font)
         painter.setPen(QColor('#c3b49c'))
@@ -494,59 +627,81 @@ class BaseTenureItemRenderer(object):
         #Adjust left margin of items title
         items_title_rect.adjust(1, 0, 0, 0)
         painter.setPen(self._normal_text_color)
-        painter.drawText(items_title_rect, Qt.AlignLeft, self.items_title)
+        self.draw_text(
+            painter,
+            self.items_title,
+            self.items_title_font,
+            items_title_rect
+        )
 
         #Items listing
-        items_margin = 4
-        items_vertical_pos = header_height + items_title_height + 7
+        items_margin = 6
+        items_vertical_pos = header_height + items_title_height + 16
         items_w = self._side - (items_margin * 2)
         items_rect = QRect(
             header_start_pos + items_margin,
             items_vertical_pos,
             items_w,
-            items_height + (margin * 2)
+            items_height
         )
 
-        painter.setFont(self.items_font)
-        painter.setPen(self._text_item_color)
-        multiline_items = self._elided_items(painter, items_w)
+        #Draw if there are items
+        if len(self.items) > 0:
+            painter.setFont(self.items_font)
+            painter.setPen(self._text_item_color)
+            multiline_items = self._elided_items(self.items_font, items_w)
 
-        #If auto-adjust is disabled then extract subset that will fit
-        if not self.auto_adjust_height():
-            multiline_items = self.items_by_height(
-                items_height,
-                multiline_items
+            #If auto-adjust is disabled then extract subset that will fit
+            if not self.auto_adjust_height():
+                multiline_items = self.items_by_height(
+                    items_height,
+                    multiline_items
+                )
+
+            #QTextLayout requires the unicode character of the line separator
+            multiline_items = u'\u2028'.join(multiline_items)
+            self.draw_text(
+                painter,
+                multiline_items,
+                self.items_font,
+                items_rect,
+                Qt.AlignLeft|Qt.AlignTop
             )
 
-        multiline_items = '\n'.join(multiline_items)
-        painter.drawText(items_rect, Qt.AlignLeft, multiline_items)
 
-
-class EntityRenderer(BaseTenureItemRenderer):
+class EntityItem(BaseTenureItem):
     """
-    Renders Party and SpatialUnit items in a profile's social tenure
+    Represents a Party or a SpatialUnit items in a profile's social tenure
     relationship.
     """
-    def __init__(self, **kwargs):
-        BaseTenureItemRenderer.__init__(self, **kwargs)
+    Type = QGraphicsItem.UserType + 2
+
+    def __init__(self, *args, **kwargs):
+        super(EntityItem, self).__init__(*args, **kwargs)
         columns = QApplication.translate(
             'ProfileTenureView',
             'columns'
         )
         self.items_title = u'<<{0}>>'.format(columns)
 
+    def type(self):
+        return EntityItem.Type
+
     def _on_set_entity(self):
         if not self._entity is None:
             self.header = self.entity.short_name
             self.items = self.entity.columns.keys()
+            self.update()
 
 
-class TenureRelationshipRenderer(BaseTenureItemRenderer):
+class TenureRelationshipItem(BaseTenureItem):
     """
     Renders the profile's tenure relationship by listing the tenure types.
     """
-    def __init__(self, **kwargs):
-        BaseTenureItemRenderer.__init__(self, **kwargs)
+    Type = QGraphicsItem.UserType + 3
+
+    def __init__(self, *args, **kwargs):
+        super(TenureRelationshipItem, self).__init__(*args, **kwargs)
         tenure_types = QApplication.translate(
             'ProfileTenureView',
             'tenure types'
@@ -556,7 +711,11 @@ class TenureRelationshipRenderer(BaseTenureItemRenderer):
             'ProfileTenureView',
             'Social Tenure'
         )
-        self.items = ['Tenancy', 'Ownership', 'Lease']
+
+        self.items = ['Ownership', 'Tenancy', 'Farming Rights']
+
+    def type(self):
+        return TenureRelationshipItem.Type
 
     def auto_adjust_height(self):
         #Base class override
@@ -565,14 +724,17 @@ class TenureRelationshipRenderer(BaseTenureItemRenderer):
     def _on_set_entity(self):
         if not self._entity is None:
             self.items = self.entity.tenure_type_lookup.value_list.lookups()
+            self.update()
 
 
-class TenureDocumentRenderer(BaseTenureItemRenderer):
+class TenureDocumentItem(BaseTenureItem):
     """
     Renders the document types for the social tenure relationship.
     """
-    def __init__(self, **kwargs):
-        BaseTenureItemRenderer.__init__(self, **kwargs)
+    Type = QGraphicsItem.UserType + 4
+
+    def __init__(self, *args, **kwargs):
+        super(TenureDocumentItem, self).__init__(*args, **kwargs)
         tenure_types = QApplication.translate(
             'ProfileTenureView',
             'document types'
@@ -580,8 +742,11 @@ class TenureDocumentRenderer(BaseTenureItemRenderer):
         self.items_title = u'<<{0}>>'.format(tenure_types)
         self.header = QApplication.translate(
             'ProfileTenureView',
-            'Supporting Documents'
+            'Documents'
         )
+
+    def type(self):
+        return TenureDocumentItem.Type
 
     def auto_adjust_height(self):
         #Base class override
@@ -592,32 +757,56 @@ class TenureDocumentRenderer(BaseTenureItemRenderer):
             supporting_doc = self.entity.supporting_doc
             self.items = supporting_doc.doc_type.value_list.lookups()
 
+            self.update()
 
-class ProfileTenureView(QWidget):
+
+class ProfileTenureView(QGraphicsView):
     """
     A widget for rendering a profile's social tenure relationship. It also
     includes functionality for saving the view as an image.
     """
+    MIN_DPI = 72
+    MAX_DPI = 600
+
     def __init__(self, parent=None, profile=None):
-        QWidget.__init__(self, parent)
-        self._profile = profile
+        super(ProfileTenureView, self).__init__(parent)
 
-        self.setBackgroundRole(QPalette.Base)
-        self.setAutoFillBackground(True)
+        #Init items
+        #Container for party entities and corresponding items
+        self._default_party_item = EntityItem()
+        self._party_items = {}
+        self._sp_item = EntityItem()
+        self._str_item = TenureRelationshipItem()
+        self._supporting_doc_item = TenureDocumentItem()
 
-        self.pen = QPen(
-            QColor('#EDBB99'),
-            1,
-            Qt.SolidLine,
-            Qt.RoundCap,
-            Qt.MiterJoin
-        )
+        self.profile = profile
 
-        #Set STR item renderers
-        self._party_renderer = EntityRenderer()
-        self._sp_unit_renderer = EntityRenderer()
-        self._str_renderer = TenureRelationshipRenderer()
-        self._supporting_doc_renderer = TenureDocumentRenderer()
+        scene_rect = QRectF(0, 0, 960, 540)
+
+        scene = QGraphicsScene(self)
+        scene.setItemIndexMethod(QGraphicsScene.NoIndex)
+        scene.setSceneRect(scene_rect)
+
+        self.setRenderHint(QPainter.Antialiasing)
+        self.setRenderHint(QPainter.TextAntialiasing)
+        self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
+
+        self.setScene(scene)
+
+        #Add items to view
+        self.scene().addItem(self._default_party_item)
+        self.scene().addItem(self._str_item)
+        self.scene().addItem(self._sp_item)
+        self.scene().addItem(self._supporting_doc_item)
+
+        #Position items
+        self._default_party_item.setPos(200, 20)
+        self._str_item.setPos(400, 20)
+        self._sp_item.setPos(600, 20)
+        self._supporting_doc_item.setPos(400, 220)
+
+        #Ensure vertical scroll is at the top
+        self.centerOn(480.0, 20.0)
 
     @property
     def profile(self):
@@ -627,6 +816,17 @@ class ProfileTenureView(QWidget):
         """
         return self._profile
 
+    def _update_profile(self):
+        #Update profile objects and render
+        if self._profile is None:
+            return
+
+        str_ent = self._profile.social_tenure
+        # Set renderer entities
+        self._sp_item.entity = str_ent.spatial_unit
+        self._str_item.entity = str_ent
+        self._supporting_doc_item.entity = str_ent
+
     @profile.setter
     def profile(self, profile):
         """
@@ -634,38 +834,9 @@ class ProfileTenureView(QWidget):
         :param profile: Profile object to be rendered.
         :type profile: Profile
         """
-        if profile is None:
-            return
-
         self._profile = profile
 
-        str_ent = profile.social_tenure
-
-        #Set renderer entities
-        self._party_renderer.entity = str_ent.party
-        self._sp_unit_renderer.entity = str_ent.spatial_unit
-        self._str_renderer.entity = str_ent
-        self._supporting_doc_renderer.entity = str_ent
-
-        self.update()
-
-    def set_party(self, party):
-        """
-        Set the party entity.
-        :param party: Entity corresponding to a party in a profile's STR
-        relationship.
-        :type party: Entity
-        """
-        self._party_renderer.entity = party
-        self.update()
-
-    def party(self):
-        """
-        :return: Returns the entity corresponding to a party in a profile's
-        STR relationship.
-        :rtype: Entity
-        """
-        return self._party_renderer.entity
+        self._update_profile()
 
     def set_spatial_unit(self, spatial_unit):
         """
@@ -674,26 +845,82 @@ class ProfileTenureView(QWidget):
         profile's STR relationship.
         :type spatial_unit: Entity
         """
-        self._sp_unit_renderer.entity = spatial_unit
-        self.update()
+        self._sp_item.entity = spatial_unit
 
-    def spatial_unit(self):
-        """
-        :return: Returns the entity corresponding to a spatial unit in a
-        profile's STR relationship.
-        :rtype: Entity
-        """
-        return self._sp_unit_renderer.entity
+        self._sp_item.update()
 
-    def save_tenure_view(self, path):
+    def save_image_to_file(self, path, resolution=96):
         """
-        Saves the profile tenure view as an image.
+        Saves the profile tenure view image to file using A4 paper size.
         :param path: Absolute path where the image will be saved.
         :type path: str
-        :return: Returns True if the operation succeeded, otherwise False.
-        :rtype: bool
+        :param resolution: Resolution in dpi. Default is 96.
+        :type resolution: int
+        :return: Returns True if the operation succeeded, otherwise False. If
+        False then a corresponding message is returned as well.
+        :rtype: (bool, str)
         """
-        pass
+        image = self.image(resolution)
+
+        if image.isNull():
+            msg = self.tr('Constructed image is null.')
+
+            return False, msg
+
+        #Test if file is writeable
+        fl = QFile(path)
+        if not fl.open(QIODevice.WriteOnly):
+            msg = self.tr('The image file cannot be saved in the '
+                          'specified location.')
+
+            return False, msg
+
+        #Attempt to save to file
+        save_op = image.save(fl)
+
+        if not save_op:
+            msg = self.tr('Image operation failed.')
+
+            return False, msg
+
+        return True, ''
+
+    def image(self, resolution):
+        """
+        Renders the view onto a QImage object.
+        :param resolution: Resolution of the image in dpi.
+        :type resolution: int
+        :return: Returns a QImage object corresponding to the profile STR
+        view.
+        :rtype: QImage
+        """
+        #Ensure resolution is within limits
+        if resolution < ProfileTenureView.MIN_DPI:
+            resolution = ProfileTenureView.MIN_DPI
+        if resolution > ProfileTenureView.MAX_DPI:
+            resolution = ProfileTenureView.MAX_DPI
+
+        #In mm
+        res = resolution/25.4
+
+        #In metres
+        dpm = res * 1000
+
+        #A4 landscape size
+        width = 297 * res
+        height = 210 * res
+
+        img = QImage(int(width), int(height), QImage.Format_ARGB32)
+        img.setDotsPerMeterX(int(dpm))
+        img.setDotsPerMeterY(int(dpm))
+        img.fill(Qt.white)
+
+        painter = QPainter(img)
+        painter.setRenderHint(QPainter.Antialiasing)
+        self.scene().render(painter)
+        painter.end()
+
+        return img
 
     def valid(self):
         """
@@ -701,6 +928,7 @@ class ProfileTenureView(QWidget):
         entities have not been set. Otherwise True.
         :rtype: bool
         """
+        #TODO: Refactor
         if self._party_renderer.entity is None:
             return False
 
@@ -710,78 +938,20 @@ class ProfileTenureView(QWidget):
         return True
 
     def minimumSizeHint(self):
-        return QSize(320, 180)
+        return QSize(480, 270)
 
     def sizeHint(self):
         return QSize(560, 315)
-
-    def paintEvent(self, event):
-        """
-        Render social tenure relationship in the widget.
-        :param event: Paint event handler.
-        :type event: QPaintEvent
-        """
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.setRenderHint(QPainter.TextAntialiasing, True)
-
-        painter.save()
-
-        width, height = self.width(), self.height()
-
-        aspect_ratio = 16/9.0
-
-        #We adjust the view port to respect the above aspect ratio
-        adjusted_height = width * (1/aspect_ratio)
-
-        if adjusted_height > height:
-            adjusted_width = aspect_ratio * height
-            adjusted_height = height
-            height = adjusted_height
-        else:
-            adjusted_width = width
-
-        painter.setViewport(
-            0,
-            (height - adjusted_height)/2,
-            adjusted_width,
-            adjusted_height
-        )
-
-        painter.setWindow(0, 0, 240, 135)
-
-        #Render party entity
-        painter.translate(0, 0)
-        self._party_renderer.paint(self, painter, event)
-
-        arrow = ArrowItem(QPointF(62.0,30.0), QPointF(89.0,30.0), fill_arrow_head=True)
-        arrow.paint(self, painter, event)
-
-        #Render social tenure entity
-        #Apply a gap of 25 pixels between items (party, STR, spatial unit)
-        painter.translate(85, 0)
-        self._str_renderer.paint(self, painter, event)
-
-        #Render spatial unit entity
-        painter.translate(85, 0)
-        self._sp_unit_renderer.paint(self, painter, event)
-
-        #Render supporting documents entity
-        painter.translate(-85, 70)
-        self._supporting_doc_renderer.paint(self, painter, event)
-
-        painter.restore()
-
-        #Draw outline
-        painter.setPen(QColor('#ABB2B9'))
-        painter.setBrush(Qt.NoBrush)
-        painter.drawRect(QRect(0, 0, width, height))
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
 
     test_win = QWidget()
     tenure_view = ProfileTenureView()
+
+    #Test image
+    p = 'D:/Temp/STR_Image.png'
+    status, msg = tenure_view.save_image_to_file(p, 300)
 
     layout = QGridLayout()
     layout.addWidget(tenure_view, 0, 0, 1, 1)

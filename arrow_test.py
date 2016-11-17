@@ -7,134 +7,195 @@ from PyQt4.QtGui import (
     QColor,
     QFont,
     QFontMetrics,
+    QGraphicsItem,
+    QGraphicsRectItem,
+    QGraphicsScene,
+    QGraphicsView,
     QGridLayout,
+    QImage,
     QLinearGradient,
     QPainter,
+    QPainterPath,
     QPaintEvent,
     QPalette,
     QPen,
+    QTextLayout,
     QWidget
 )
 from PyQt4.QtCore import (
+    QFile,
+    QIODevice,
     QLine,
     QLineF,
     QPoint,
     QPointF,
     QRect,
+    QRectF,
     QSize,
     Qt
 )
 
+class FontPaintingUtil(object):
+    FONT_WORKAROUND_SCALE = 10
 
-class ProfileTenureView(QWidget):
-    """
-    A widget for rendering a profile's social tenure relationship. It also
-    includes functionality for saving the view as an image.
-    """
-    def __init__(self, parent=None, profile=None):
-        QWidget.__init__(self, parent)
-        self._profile = profile
+    @staticmethod
+    def points_to_MM(point_size):
+        return point_size / 0.35278
 
-        self.setBackgroundRole(QPalette.Base)
-        self.setAutoFillBackground(True)
+    @staticmethod
+    def scaled_font_pixel_size(font):
+        scaled_font = font
+        pixel_size = (FontPaintingUtil.points_to_MM(scaled_font.pointSizeF()) * \
+                     FontPaintingUtil.FONT_WORKAROUND_SCALE) + 0.5
 
-        self.pen = QPen(
-            QColor('#EDBB99'),
+        scaled_font.setPixelSize(pixel_size)
+
+        return scaled_font
+
+    @staticmethod
+    def draw_text(painter, rect, text, font):
+        text_font = FontPaintingUtil.scaled_font_pixel_size(font)
+
+        scaled_rect = QRectF(rect.x() * FontPaintingUtil.FONT_WORKAROUND_SCALE,
+                             rect.y() * FontPaintingUtil.FONT_WORKAROUND_SCALE,
+                             rect.width() * FontPaintingUtil.FONT_WORKAROUND_SCALE,
+                             rect.height() * FontPaintingUtil.FONT_WORKAROUND_SCALE)
+
+        painter.save()
+        painter.setFont(text_font)
+
+        sf = 1.0 / FontPaintingUtil.FONT_WORKAROUND_SCALE
+        painter.scale(sf, sf)
+        painter.drawText(scaled_rect, Qt.AlignCenter|Qt.TextWordWrap, text)
+
+        painter.restore()
+
+
+class RectItem(QGraphicsRectItem):
+
+    def __init__(self, parent=None, scene=None):
+        super(RectItem, self).__init__(parent, scene)
+
+        self.setFlag(QGraphicsItem.ItemIsMovable)
+        self.color = Qt.black
+        self.setPen(QPen(self.color, 1, Qt.SolidLine,
+                Qt.RoundCap, Qt.RoundJoin))
+
+    def boundingRect(self):
+        return QRectF(8, 8, 125, 125)
+
+    def shape(self):
+        path = QPainterPath()
+        path.addRect(QRectF(8, 8, 125, 125))
+
+        return path
+
+    def paint(self, painter, option, widget=None):
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        shadow_rect = QRectF(12, 12, 120, 120)
+
+        shadow_start_pos = 12
+        shadow_stop_pos = 132
+        shadow_gradient = QLinearGradient(
+            shadow_start_pos,
+            shadow_start_pos,
+            shadow_stop_pos,
+            shadow_stop_pos
+        )
+        shadow_gradient.setColorAt(0.0, QColor('#f7f8f9'))
+        shadow_gradient.setColorAt(1.0, QColor('#d1d1d1'))
+        brush = QBrush(shadow_gradient)
+
+        #Create shadow effect using linear gradient
+        painter.setBrush(brush)
+        painter.setPen(Qt.NoPen)
+        painter.drawRect(shadow_rect)
+
+        #Main item gradient
+        gradient = QLinearGradient(
+            10,
+            10,
+            128,
+            128
+        )
+
+        gradient_light = QColor('#fcf2e3')
+        gradient_dark = QColor('#e9dac2')
+        gradient.setColorAt(0.0, gradient_light)
+        gradient.setColorAt(1.0, gradient_dark)
+        brush2 = QBrush(gradient)
+
+        painter.setPen(self.pen())
+        painter.setBrush(brush2)
+        painter.drawRect(QRectF(10, 10, 118, 118))
+
+        font = QFont('Consolas', 12, 75)
+        painter.setFont(font)
+
+        '''
+        #FontPaintingUtil.draw_text(painter,text_rect, 'Rectangle', font)
+        #painter.drawText(text_rect, Qt.AlignCenter, 'Rectangle')
+
+        #UsingQTextLayout
+        layout = QTextLayout('Rectangle', font)
+        layout.beginLayout()
+        while layout.createLine().isValid():
+            pass
+        layout.endLayout()
+
+        y = 0
+        max_width = 0
+
+        #Set line position
+        for i in range(layout.lineCount()):
+            line = layout.lineAt(i)
+            max_width = max(max_width, line.naturalTextWidth())
+            line.setPosition(QPointF(0, y))
+            y += line.height()
+
+        pen = QPen(
+            Qt.black,
             1,
             Qt.SolidLine,
             Qt.RoundCap,
-            Qt.MiterJoin
+            Qt.RoundJoin
         )
+        painter.setPen(pen)
 
-    @property
-    def profile(self):
-        """
-        :return: The profile object being rendered.
-        :rtype: Profile
-        """
-        return self._profile
+        #Apply pen in text format
+        fr = QTextLayout.FormatRange()
+        fr.start = 0
+        fr.length = len(layout.text())
+        fr.format.setTextOutline(pen)
+        layout.setAdditionalFormats([fr])
 
-    @profile.setter
-    def profile(self, profile):
-        """
-        Sets the profile object whose STR view is to rendered.
-        :param profile: Profile object to be rendered.
-        :type profile: Profile
-        """
-        if profile is None:
-            return
+        painter.drawRect(QRectF(12, 12, 114, 40))
 
-        self._profile = profile
+        start_x = 12 + (114 - max_width) / 2.0
+        start_y = 12 + (40 - y) / 2.0
 
-        str_ent = profile.social_tenure
+        #Draw text
+        layout.draw(painter, QPointF(start_x, start_y))
+        '''
 
-        #Set renderer entities
-        self._party_renderer.entity = str_ent.party
-        self._sp_unit_renderer.entity = str_ent.spatial_unit
-        self._str_renderer.entity = str_ent
-        self._supporting_doc_renderer.entity = str_ent
 
-        self.update()
+class ProfileTenureView(QGraphicsView):
+    MIN_DPI = 72
+    MAX_DPI = 300
 
-    def set_party(self, party):
-        """
-        Set the party entity.
-        :param party: Entity corresponding to a party in a profile's STR
-        relationship.
-        :type party: Entity
-        """
-        self._party_renderer.entity = party
-        self.update()
+    def __init__(self, parent=None):
+        super(ProfileTenureView, self).__init__(parent)
 
-    def party(self):
-        """
-        :return: Returns the entity corresponding to a party in a profile's
-        STR relationship.
-        :rtype: Entity
-        """
-        return self._party_renderer.entity
+        self._scene = QGraphicsScene(self)
+        self._scene.setItemIndexMethod(QGraphicsScene.NoIndex)
+        self._scene.setSceneRect(QRectF(0, 0, 960, 540))
 
-    def set_spatial_unit(self, spatial_unit):
-        """
-        Set the spatial unit entity.
-        :param spatial_unit: Entity corresponding to a spatial unit in a
-        profile's STR relationship.
-        :type spatial_unit: Entity
-        """
-        self._sp_unit_renderer.entity = spatial_unit
-        self.update()
+        self.setScene(self._scene)
 
-    def spatial_unit(self):
-        """
-        :return: Returns the entity corresponding to a spatial unit in a
-        profile's STR relationship.
-        :rtype: Entity
-        """
-        return self._sp_unit_renderer.entity
+        item = RectItem()
+        self._scene.addItem(item)
 
-    def save_tenure_view(self, path):
-        """
-        Saves the profile tenure view as an image.
-        :param path: Absolute path where the image will be saved.
-        :type path: str
-        :return: Returns True if the operation succeeded, otherwise False.
-        :rtype: bool
-        """
-        pass
-
-    def valid(self):
-        """
-        :return: Returns False if the respective party and spatial unit
-        entities have not been set. Otherwise True.
-        :rtype: bool
-        """
-        if self._party_renderer.entity is None:
-            return False
-
-        if self._sp_unit_renderer.entity is None:
-            return False
-
-        return True
+        self.centerOn(0.0, 0.0)
 
     def minimumSizeHint(self):
         return QSize(320, 180)
@@ -142,93 +203,88 @@ class ProfileTenureView(QWidget):
     def sizeHint(self):
         return QSize(560, 315)
 
-    def paintEvent(self, event):
+    def save_image_to_file(self, path, resolution=96):
         """
-        Render social tenure relationship in the widget.
-        :param event: Paint event handler.
-        :type event: QPaintEvent
+        Saves the profile tenure view image to file using A4 paper size.
+        :param path: Absolute path where the image will be saved.
+        :type path: str
+        :param resolution: Resolution in dpi. Default is 96.
+        :type resolution: int
+        :return: Returns True if the operation succeeded, otherwise False. If
+        False then a corresponding message is returned as well.
+        :rtype: (bool, str)
         """
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.setRenderHint(QPainter.TextAntialiasing, True)
+        image = self.image(resolution)
 
-        painter.save()
+        if image.isNull():
+            msg = self.tr('Constructed image is null.')
 
-        width, height = self.width(), self.height()
+            return False, msg
 
-        aspect_ratio = 16/9.0
+        #Test if file is writeable
+        fl = QFile(path)
+        if not fl.open(QIODevice.WriteOnly):
+            msg = self.tr('The image file cannot be saved in the '
+                          'specified location.')
 
-        #We adjust the view port to respect the above aspect ratio
-        adjusted_height = width * (1/aspect_ratio)
+            return False, msg
 
-        if adjusted_height > height:
-            adjusted_width = aspect_ratio * height
-            adjusted_height = height
-            height = adjusted_height
-        else:
-            adjusted_width = width
+        #Attempt to save to file
+        save_op = image.save(fl)
 
-        painter.setViewport(
-            0,
-            (height - adjusted_height)/2,
-            adjusted_width,
-            adjusted_height
-        )
+        if not save_op:
+            msg = self.tr('Image operation failed.')
 
-        painter.setWindow(0, 0, 240, 135)
+            return False, msg
 
-        end_point = QPointF(10.0, 120.0)
-        start_point = QPointF(200.0,40.0)
-        line = QLineF(start_point, end_point)
+        return True, ''
 
-        painter.drawLine(line.toLine())
+    def image(self, resolution):
+        """
+        Renders the view onto a QImage object.
+        :param resolution: Resolution of the image in dpi.
+        :type resolution: int
+        :return: Returns a QImage object corresponding to the profile STR
+        view.
+        :rtype: QImage
+        """
+        #Ensure resolution is within limits
+        if resolution < ProfileTenureView.MIN_DPI:
+            resolution = ProfileTenureView.MIN_DPI
+        if resolution > ProfileTenureView.MAX_DPI:
+            resolution = ProfileTenureView.MAX_DPI
 
-        #Draw arrow head
-        arrow_tip_angle = 20
-        ang_rad = math.radians(arrow_tip_angle)
-        arrow_head_width = 10
-        arrow_length = line.length()
+        #In mm
+        res = resolution / 25.4
 
-        #Setup computation parameters
-        cnt_factor = (arrow_head_width)/(math.tan(ang_rad) * arrow_length)
-        cnt_point_delta = arrow_head_width/arrow_length
+        #In metres
+        dpm = res * 1000
 
-        #Get arrow base along the line
-        arrow_base_x = end_point.x() - (line.dx() * cnt_factor)
-        arrow_base_y = end_point.y() - (line.dy() * cnt_factor)
+        #A4 landscape size
+        width = 297 * res
+        height = 210 * res
 
-        #Get position of arrow points
-        cnt_point_dx = -(line.dy() * cnt_point_delta)
-        cnt_point_dy = line.dx() * cnt_point_delta
+        img = QImage(int(width), int(height), QImage.Format_ARGB32)
+        img.setDotsPerMeterX(int(dpm))
+        img.setDotsPerMeterY(int(dpm))
+        img.fill(Qt.white)
 
-        #A1 position
-        a1_x = arrow_base_x - cnt_point_dx
-        a1_y = arrow_base_y - cnt_point_dy
-        a1 = QPointF(a1_x, a1_y)
+        painter = QPainter(img)
+        painter.setRenderHint(QPainter.Antialiasing)
 
-        line_a1 = QLineF(a1, end_point)
-        painter.drawLine(line_a1)
+        self.scene().render(painter)
+        painter.end()
 
-        #A2 position
-        a2_x = arrow_base_x + cnt_point_dx
-        a2_y = arrow_base_y + cnt_point_dy
-        a2 = QPointF(a2_x, a2_y)
-
-        line_a2 = QLineF(a2, end_point)
-        painter.drawLine(line_a2)
-
-        painter.restore()
-
-        #Draw outline
-        painter.setPen(QColor('#ABB2B9'))
-        painter.setBrush(Qt.NoBrush)
-        painter.drawRect(QRect(0, 0, width, height))
+        return img
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
 
     test_win = QWidget()
     tenure_view = ProfileTenureView()
+
+    p = 'D:/Temp/Test_Font_Scaling.png'
+    status, msg = tenure_view.save_image_to_file(p, 300)
 
     layout = QGridLayout()
     layout.addWidget(tenure_view, 0, 0, 1, 1)
