@@ -51,6 +51,7 @@ from PyQt4.QtCore import (
     QRect,
     QRectF,
     QSize,
+    QSizeF,
     Qt
 )
 
@@ -318,7 +319,8 @@ class EntityIconRenderer(BaseIconRender):
         p.drawLine(h1_sep)
 
         h_col_pen = QPen(self.pen)
-        h_col_pen.setColor(QColor('#32A7BB'))
+        #h_col_pen.setColor(QColor('#32A7BB'))
+        h_col_pen.setColor(QColor('#1399FC'))
         p.setPen(h_col_pen)
 
         delta_v = 12 / 3.0
@@ -352,14 +354,14 @@ class DocumentIconRenderer(BaseIconRender):
         p.setBrush(back_leaf_brush)
 
         leaf_1 = QPainterPath()
-        leaf_1.moveTo(self.upper_left + QPointF(0, (self.height - 0.5)))
-        leaf_1.lineTo(self.upper_left + QPointF(0, 6.0))
-        leaf_1.lineTo(self.upper_left + QPointF(2.0, 6.0))
-        leaf_1.lineTo(self.upper_left + QPointF(4.0, 3.5))
-        leaf_1.lineTo(self.upper_left + QPointF(8.0, 3.5))
-        leaf_1.lineTo(self.upper_left + QPointF(10.0, 6.0))
-        leaf_1.lineTo(self.upper_left + QPointF(13.0, 6.0))
-        leaf_1.lineTo(self.upper_left + QPointF(13.0, self.height - 0.5))
+        leaf_1.moveTo(self.upper_left + QPointF(0, (self.height - 1.5)))
+        leaf_1.lineTo(self.upper_left + QPointF(0, 5.0))
+        leaf_1.lineTo(self.upper_left + QPointF(2.0, 5.0))
+        leaf_1.lineTo(self.upper_left + QPointF(4.0, 2.5))
+        leaf_1.lineTo(self.upper_left + QPointF(8.0, 2.5))
+        leaf_1.lineTo(self.upper_left + QPointF(10.0, 5.0))
+        leaf_1.lineTo(self.upper_left + QPointF(13.0, 5.0))
+        leaf_1.lineTo(self.upper_left + QPointF(13.0, self.height - 1.5))
         leaf_1.closeSubpath()
         p.drawPath(leaf_1)
 
@@ -372,6 +374,49 @@ class DocumentIconRenderer(BaseIconRender):
         leaf_2.lineTo(self.upper_left + QPointF(13.0, self.height - 0.5))
         leaf_2.closeSubpath()
         p.drawPath(leaf_2)
+
+        p.restore()
+
+
+class TenureLinkRenderer(BaseIconRender):
+    """Renders an icon depicting a link between the party and
+    spatial unit."""
+
+    def draw(self, p, item):
+        p.save()
+
+        outline = QPen(self.pen)
+        outline.setColor(QColor('#1399FC'))
+        outline.setCapStyle(Qt.RoundCap)
+        outline.setWidthF(1.6)
+        p.setPen(outline)
+
+        #Set segment fill brush
+        seg_brush = QBrush(QColor('#C2E4F8'))
+        p.setBrush(seg_brush)
+
+        #Draw link segment
+        link_path = QPainterPath()
+        link_path.moveTo(self.upper_left + QPointF(2.0, 5.0))
+        rect_pos = self.upper_left + QPointF(0.5, 5.0)
+        arc_rect = QRectF(rect_pos, QSizeF(3.0, 6.0))
+        link_path.arcTo(arc_rect, 90, 180.0)
+        link_path.lineTo(self.upper_left + QPointF(5.5, 11.0))
+        rect_pos_2 = self.upper_left + QPointF(4.0, 5.0)
+        arc_rect_2 = QRectF(rect_pos_2, QSizeF(3.0, 6.0))
+        link_path.arcTo(arc_rect_2, -90, 180)
+        link_path.closeSubpath()
+        p.drawPath(link_path)
+
+        #Draw 2nd segment
+        p.translate(8.5, 0)
+        p.drawPath(link_path)
+
+        #Draw segment connector
+        p.translate(-8.5, 0)
+        start_p = self.upper_left + QPointF(5.0, 8.0)
+        end_p = self.upper_left + QPointF(11.0, 8.0)
+        p.drawLine(QLineF(start_p, end_p))
 
         p.restore()
 
@@ -887,6 +932,10 @@ class TenureRelationshipItem(BaseTenureItem):
             'ProfileTenureView',
             'Social Tenure'
         )
+
+        #Use default renderer if none is specified
+        if self.icon_renderer is None:
+            self.icon_renderer = TenureLinkRenderer()
 
     def type(self):
         return TenureRelationshipItem.Type

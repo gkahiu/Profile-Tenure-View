@@ -165,6 +165,15 @@ class RectItem(QGraphicsRectItem):
         painter.drawLine(col_sep_1)
         painter.drawLine(col_sep_2)
 
+        painter.setBrush(Qt.NoBrush)
+
+        arc_rect = QRectF(40, 40, 50, 30)
+        pp = QPainterPath()
+        pp.moveTo(65, 40)
+        pp.arcTo(arc_rect, 90, 180)
+        painter.drawPath(pp)
+        painter.drawRect(arc_rect)
+
 
 class ProfileTenureView(QGraphicsView):
     MIN_DPI = 72
