@@ -226,9 +226,9 @@ class BaseIconRender(object):
     tenure item. This is an abstract class and needs to be sub-classed for
     custom renderers."""
     def __init__(self):
-        #Icon area is 20px by 20px
-        self.upper_left = QPointF(140.5, 14.0)
-        self.bottom_right = QPointF(160.5, 34.0)
+        #Icon area is 16px by 16px
+        self.upper_left = QPointF(142.5, 16.5)
+        self.bottom_right = QPointF(158.5, 32.5)
 
     def bounding_rect(self):
         """
@@ -305,8 +305,8 @@ class EntityIconRenderer(BaseIconRender):
         p.drawRect(cols_header_rect)
 
         #Draw vertical column separator
-        v_start_point = self.upper_left + QPointF(10.0, 0)
-        v_end_point = self.upper_left + QPointF(10.0, 20.0)
+        v_start_point = self.upper_left + QPointF(8.0, 0)
+        v_end_point = self.upper_left + QPointF(8.0, 16.0)
         col_vertical_sep = QLineF(v_start_point, v_end_point)
         p.setPen(self.pen)
         p.drawLine(col_vertical_sep)
@@ -321,7 +321,7 @@ class EntityIconRenderer(BaseIconRender):
         h_col_pen.setColor(QColor('#32A7BB'))
         p.setPen(h_col_pen)
 
-        delta_v = 16 / 3.0
+        delta_v = 12 / 3.0
         y = 4.0 + delta_v
 
         for i in range(2):
@@ -333,6 +333,45 @@ class EntityIconRenderer(BaseIconRender):
 
             p.drawLine(h_sep)
 
+
+        p.restore()
+
+
+class DocumentIconRenderer(BaseIconRender):
+    """Renderer for document icon."""
+
+    def draw(self, p, item):
+        p.save()
+
+        #Draw primary folder
+        outline = QPen(self.pen)
+        outline.setColor(QColor('#1399FC'))
+        p.setPen(outline)
+
+        back_leaf_brush = QBrush(QColor('#C2E4F8'))
+        p.setBrush(back_leaf_brush)
+
+        leaf_1 = QPainterPath()
+        leaf_1.moveTo(self.upper_left + QPointF(0, (self.height - 0.5)))
+        leaf_1.lineTo(self.upper_left + QPointF(0, 6.0))
+        leaf_1.lineTo(self.upper_left + QPointF(2.0, 6.0))
+        leaf_1.lineTo(self.upper_left + QPointF(4.0, 3.5))
+        leaf_1.lineTo(self.upper_left + QPointF(8.0, 3.5))
+        leaf_1.lineTo(self.upper_left + QPointF(10.0, 6.0))
+        leaf_1.lineTo(self.upper_left + QPointF(13.0, 6.0))
+        leaf_1.lineTo(self.upper_left + QPointF(13.0, self.height - 0.5))
+        leaf_1.closeSubpath()
+        p.drawPath(leaf_1)
+
+        #Front folder leaf
+        p.setBrush(QBrush(Qt.white))
+        leaf_2 = QPainterPath()
+        leaf_2.moveTo(self.upper_left + QPointF(0.5, (self.height - 0.5)))
+        leaf_2.lineTo(self.upper_left + QPointF(3.0, 8.5))
+        leaf_2.lineTo(self.upper_left + QPointF(15.5, 8.5))
+        leaf_2.lineTo(self.upper_left + QPointF(13.0, self.height - 0.5))
+        leaf_2.closeSubpath()
+        p.drawPath(leaf_2)
 
         p.restore()
 
@@ -721,7 +760,7 @@ class BaseTenureItem(QGraphicsItem):
         #Adjust header text area if there is an icon renderer
         if not self.icon_renderer is None:
             init_width = header_rect.width()
-            adj_width = init_width - (self.icon_renderer.width + 4)
+            adj_width = init_width - (self.icon_renderer.width + 6)
             header_rect.setWidth(adj_width)
 
         #Draw header icon if renderer is available
@@ -879,6 +918,10 @@ class TenureDocumentItem(BaseTenureItem):
             'ProfileTenureView',
             'Documents'
         )
+
+        #Use default renderer if none is specified
+        if self.icon_renderer is None:
+            self.icon_renderer = DocumentIconRenderer()
 
     def type(self):
         return TenureDocumentItem.Type
@@ -1039,7 +1082,7 @@ class ProfileTenureView(QGraphicsView):
             resolution = ProfileTenureView.MAX_DPI
 
         #In mm
-        res = resolution/25.4
+        res = resolution / 25.4
 
         #In metres
         dpm = res * 1000
@@ -1054,7 +1097,7 @@ class ProfileTenureView(QGraphicsView):
         img.fill(background)
 
         painter = QPainter(img)
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.Antialiasing, True)
         self.scene().render(painter)
         painter.end()
 
@@ -1067,7 +1110,7 @@ class ProfileTenureView(QGraphicsView):
         :rtype: bool
         """
         #TODO: Refactor
-        if self._party_renderer.entity is None:
+        if len(self._party_items) == 0:
             return False
 
         if self._sp_unit_renderer.entity is None:
@@ -1088,7 +1131,7 @@ if __name__ == '__main__':
     tenure_view = ProfileTenureView()
 
     #Test image
-    p = 'D:/Temp/Dev/Images/STR_Image.png'
+    p = 'D:/Temp/STR_Image.png'
     status, msg = tenure_view.save_image_to_file(p, 300)
 
     layout = QGridLayout()
