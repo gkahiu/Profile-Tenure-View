@@ -24,6 +24,7 @@ from PyQt4.QtGui import (
     QApplication,
     QBrush,
     QColor,
+    QComboBox,
     QFont,
     QFontMetrics,
     QGraphicsItem,
@@ -32,14 +33,20 @@ from PyQt4.QtGui import (
     QGraphicsTextItem,
     QGraphicsView,
     QGridLayout,
+    QIcon,
     QImage,
+    QLabel,
     QLinearGradient,
     QKeyEvent,
     QPainter,
     QPainterPath,
     QPen,
+    QPixmap,
     QPolygonF,
+    QSizePolicy,
+    QSpacerItem,
     QTextLayout,
+    QToolButton,
     QWidget
 )
 from PyQt4.QtCore import (
@@ -54,6 +61,8 @@ from PyQt4.QtCore import (
     QSizeF,
     Qt
 )
+
+import temp_rc
 
 
 class Arrow(QGraphicsLineItem):
@@ -1185,7 +1194,7 @@ class ProfileTenureScene(QGraphicsScene):
     def __init__(self, parent=None):
         super(ProfileTenureScene, self).__init__(parent)
 
-        self.mode = ProfileTenureScene.InsertMajorAnnotation
+        self.mode = ProfileTenureScene.MoveItem
 
     def editor_lost_focus(self, item):
         """
@@ -1278,7 +1287,7 @@ class ProfileTenureView(QGraphicsView):
         self._supporting_doc_item.setPos(400, 220)
 
         #Ensure vertical scroll is at the top
-        self.centerOn(480.0, 20.0)
+        self.centerOn(490.0, 20.0)
 
         #Link social tenure item to supporting documents item
         self.add_arrow(self._supporting_doc_item, self._str_item)
@@ -1435,8 +1444,10 @@ class ProfileTenureView(QGraphicsView):
         #Deletes selected annotation items in the scene
         for item in self.scene().selectedItems():
             if isinstance(item, Annotation):
-                self.scene().removeItem(item)
-                item.deleteLater()
+                #Only remove if item is not on interactive text edit mode
+                if item.textInteractionFlags() == Qt.NoTextInteraction:
+                    self.scene().removeItem(item)
+                    item.deleteLater()
 
     def save_image_to_file(self, path, resolution=96):
         """
@@ -1474,6 +1485,30 @@ class ProfileTenureView(QGraphicsView):
 
         return True, ''
 
+    def _resolution_in_mm(self, resolution):
+        #Calculates the resolution in mm
+        return resolution / 25.4
+
+    def _resolution_in_m(self, resolution):
+        #Calculates the resolution in mm
+        return self._resolution_in_mm(resolution) * 1000
+
+    def image_size(self, resolution):
+        """
+        Computes the image size from the given resolution in dpi.
+        :param resolution: Resolution in dpi.
+        :type resolution: int
+        :return: Image size in pixels.
+        :rtype: QSize
+        """
+        res = resolution / 25.4
+
+        #A4 landscape size
+        width = 297 * res
+        height = 210 * res
+
+        return QSize(int(width), int(height))
+
     def image(self, resolution, background=Qt.white):
         """
         Renders the view onto a QImage object.
@@ -1492,17 +1527,16 @@ class ProfileTenureView(QGraphicsView):
         if resolution > ProfileTenureView.MAX_DPI:
             resolution = ProfileTenureView.MAX_DPI
 
-        #In mm
-        res = resolution / 25.4
-
         #In metres
-        dpm = res * 1000
+        dpm = self._resolution_in_m(resolution)
 
-        #A4 landscape size
-        width = 297 * res
-        height = 210 * res
+        image_size = self.image_size(resolution)
 
-        img = QImage(int(width), int(height), QImage.Format_ARGB32)
+        img = QImage(
+            image_size.width(),
+            image_size.height(),
+            QImage.Format_ARGB32
+        )
         img.setDotsPerMeterX(int(dpm))
         img.setDotsPerMeterY(int(dpm))
         img.fill(background)
@@ -1520,7 +1554,6 @@ class ProfileTenureView(QGraphicsView):
         entities have not been set. Otherwise True.
         :rtype: bool
         """
-        #TODO: Refactor
         if len(self._party_items) == 0:
             return False
 
@@ -1536,6 +1569,255 @@ class ProfileTenureView(QGraphicsView):
         return QSize(560, 315)
 
 
+class ProfileTenureDiagram(QWidget):
+    """
+    Widget for visualizing a profile's social tenure relationship definition.
+    It provides controls for zooming, adding text and exporting the view to
+    an image file, and wraps most of the ProfileTenureView functionality.
+    """
+    def __init__(self, parent=None, profile=None):
+        super(ProfileTenureDiagram, self).__init__(parent)
+
+        self._profile_view = ProfileTenureView(self, profile)
+        self.set_scene_mode(ProfileTenureScene.MoveItem)
+        self._profile_view.scene().annotation_inserted.connect(
+            self.on_annotation_inserted
+        )
+
+        self._setup_widgets()
+
+    def scene_mode(self):
+        """
+        :return: Returns the current state of the scene.
+        :rtype: int
+        """
+        return self._profile_view.scene().mode
+
+    def set_scene_mode(self, mode):
+        """
+        Sets the current state of the scene.
+        :param mode: Scene mode i.e. move item, insert major or minor
+        annotation.
+        :type mode: int
+        """
+        if self.scene_mode() != mode:
+            self._profile_view.scene().mode = mode
+
+    def _setup_widgets(self):
+        self.layout = QGridLayout(self)
+
+        self.minor_annotation = QToolButton(self)
+        self.minor_annotation.setMaximumSize(QSize(24, 24))
+        minor_icon = QIcon()
+        minor_icon.addPixmap(
+            QPixmap(':/icons/icons/minor_annotation.png')
+        )
+        self.minor_annotation.setIcon(minor_icon)
+        self.minor_annotation.setCheckable(True)
+        self.minor_annotation.setToolTip(self.tr('Minor Annotation'))
+        self.minor_annotation.toggled.connect(self.on_minor_annotation_toggled)
+        self.layout.addWidget(self.minor_annotation, 0, 0, 1, 1)
+
+        self.major_annotation = QToolButton(self)
+        self.major_annotation.setMinimumSize(QSize(24, 24))
+        major_icon = QIcon()
+        major_icon.addPixmap(
+            QPixmap(':/icons/icons/major_annotation.png')
+        )
+        self.major_annotation.setIcon(major_icon)
+        self.major_annotation.setCheckable(True)
+        self.major_annotation.setToolTip(self.tr('Major Annotation'))
+        self.major_annotation.toggled.connect(self.on_major_annotation_toggled)
+        self.layout.addWidget(self.major_annotation, 0, 1, 1, 1)
+
+        self.export_image = QToolButton(self)
+        self.export_image.setMinimumSize(QSize(24, 24))
+        export_image_icon = QIcon()
+        export_image_icon.addPixmap(
+            QPixmap(':/icons/icons/save_image.png')
+        )
+        self.export_image.setIcon(export_image_icon)
+        self.export_image.setToolTip(self.tr('Save as Image...'))
+        self.layout.addWidget(self.export_image, 0, 2, 1, 1)
+
+        spacer_item = QSpacerItem(288, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.layout.addItem(spacer_item, 0, 3, 1, 1)
+
+        self.label = QLabel(self)
+        self.label.setText(self.tr('Zoom'))
+        self.layout.addWidget(self.label, 0, 4, 1, 1)
+
+        self.zoom_cbo = QComboBox(self)
+        self.zoom_cbo.addItem(self.tr('50%'), 50 / 100.0)
+        self.zoom_cbo.addItem(self.tr('75%'), 75 / 100.0)
+        self.zoom_cbo.addItem(self.tr('100%'), 100 / 100.0)
+        self.zoom_cbo.addItem(self.tr('125%'), 125 / 100.0)
+        self.zoom_cbo.addItem(self.tr('150%'), 150 / 100.0)
+        self.zoom_cbo.setCurrentIndex(2)
+        self.zoom_cbo.currentIndexChanged.connect(self.on_zoom_changed)
+        self.layout.addWidget(self.zoom_cbo, 0, 5, 1, 1)
+
+        self.layout.addWidget(self._profile_view, 1, 0, 1, 6)
+
+    def minimumSizeHint(self):
+        return QSize(500, 320)
+
+    def sizeHint(self):
+        return QSize(600, 360)
+
+    def image_size(self, resolution):
+        """
+        Computes the image size based on the specified resolution.
+        :param resolution: Resolution in dpi.
+        :type resolution: int
+        :return: Returns a QSize object containing the width and height of
+        the image.
+        :rtype: QSize
+        """
+        return self._profile_view.image_size(resolution)
+
+    def on_major_annotation_toggled(self, state):
+        """
+        Slot raised when the major annotation tool button has been toggled.
+        :param state: Button state
+        :type state: bool
+        """
+        if not state and self.scene_mode() != ProfileTenureScene.MoveItem:
+            self.set_scene_mode(ProfileTenureScene.MoveItem)
+
+        if state:
+            if self.minor_annotation.isChecked():
+                self.minor_annotation.setChecked(False)
+            self.set_scene_mode(ProfileTenureScene.InsertMajorAnnotation)
+
+    def on_minor_annotation_toggled(self, state):
+        """
+        Slot raised when the minor annotation tool button has been toggled.
+        :param state: Button state
+        :type state: bool
+        """
+        if not state and self.scene_mode() != ProfileTenureScene.MoveItem:
+            self.set_scene_mode(ProfileTenureScene.MoveItem)
+
+        if state:
+            if self.major_annotation.isChecked():
+                self.major_annotation.setChecked(False)
+            self.set_scene_mode(ProfileTenureScene.InsertMinorAnnotation)
+
+    def on_annotation_inserted(self, item):
+        """
+        Slot raised when an annotation item has been inserted. It unchecks
+        the correct tool button based on the annotation type.
+        :param item: Annotation item.
+        :type item: Annotation
+        """
+        if not isinstance(item, Annotation):
+            return
+
+        anno_type = item.size
+        if anno_type == Annotation.Minor:
+            self.minor_annotation.setChecked(False)
+        elif anno_type == Annotation.Major:
+            self.major_annotation.setChecked(False)
+
+    def on_zoom_changed(self, idx):
+        """
+        Slot raised when the zoom level changes to change the scale of the
+        view.
+        :param idx: Item index for the combo.
+        :type idx: int
+        """
+        if idx == -1:
+            return
+
+        #TODO: Remove conversion from QVariant
+        factor, status = self.zoom_cbo.itemData(idx).toFloat()
+        self.scale(factor)
+
+    def scale(self, factor):
+        """
+        Scales the view by the given scale factor.
+        :param factor: Scale factor
+        :type factor: float
+        """
+        if factor <= 0:
+            return
+
+        self._profile_view.scale(factor, factor)
+
+    def valid(self):
+        """
+        :return: Returns False if the respective party and spatial unit
+        entities have not been set. Otherwise True.
+        :rtype: bool
+        """
+        return self._profile_view.valid()
+
+    def save_image_to_file(self, path, resolution):
+        """
+        Saves the profile tenure view image to file using A4 paper size.
+        :param path: Absolute path where the image will be saved.
+        :type path: str
+        :param resolution: Resolution in dpi. Default is 96.
+        :type resolution: int
+        :return: Returns True if the operation succeeded, otherwise False. If
+        False then a corresponding message is returned as well.
+        :rtype: (bool, str)
+        """
+        return self._profile_view.save_image_to_file(path, resolution)
+
+    def set_spatial_unit(self, spatial_unit):
+        """
+        Set the spatial unit entity.
+        :param spatial_unit: Entity corresponding to a spatial unit in a
+        profile's STR relationship.
+        :type spatial_unit: Entity
+        """
+        self._profile_view.set_spatial_unit(spatial_unit)
+
+    def invalidate_spatial_unit(self):
+        """
+        Clears the spatial unit entity.
+        """
+        self._profile_view.invalidate_spatial_unit()
+
+    def add_party_entity(self, party):
+        """
+        Adds a party entity to the view. If there is a existing one with the
+        same name then it will be removed before adding this party.
+        :param party: Party entity.
+        :type party: Entity
+        """
+        self._profile_view.add_party_entity(party)
+
+    def remove_party(self, name):
+        """
+        Removes the party with the specified name from the collection.
+        :param name: Party name
+        :return: Returns True if the operation succeeded, otherwise False if
+        the party with the specified name does not exist in the collection.
+        :rtype: bool
+        """
+        return self._profile_view.remove_party(name)
+
+    @property
+    def profile(self):
+        """
+        :return: The profile object being rendered.
+        :rtype: Profile
+        """
+        return self._profile_view.profile
+
+    @profile.setter
+    def profile(self, profile):
+        """
+        Sets the profile object whose STR view is to rendered.
+        :param profile: Profile object to be rendered.
+        :type profile: Profile
+        """
+        self._profile_view.profile = profile
+
+
 class Entity(object):
     def __init__(self, name):
         self.short_name = name
@@ -1545,7 +1827,7 @@ if __name__ == '__main__':
     app = QApplication(sys.argv)
 
     test_win = QWidget()
-    tenure_view = ProfileTenureView()
+    profile_diagram = ProfileTenureDiagram()
 
     #Party entities
     p1 = Entity('Farmer')
@@ -1554,14 +1836,14 @@ if __name__ == '__main__':
     p1.columns['gender'] = 'gen'
     p1.columns['registration_number'] = 'rn'
 
-    tenure_view.add_party_entity(p1)
+    profile_diagram.add_party_entity(p1)
 
     #Test image
-    p = 'D:/Temp/STR_Image.png'
-    status, msg = tenure_view.save_image_to_file(p, 300)
+    #p = 'D:/Temp/STR_Image.png'
+    #status, msg = tenure_view.save_image_to_file(p, 300)
 
     layout = QGridLayout()
-    layout.addWidget(tenure_view, 0, 0, 1, 1)
+    layout.addWidget(profile_diagram, 0, 0, 1, 1)
     test_win.setLayout(layout)
     test_win.show()
 

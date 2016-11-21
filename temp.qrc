@@ -1,0 +1,7 @@
+<RCC>
+  <qresource prefix="icons">
+    <file>icons/minor_annotation.png</file>
+    <file>icons/major_annotation.png</file>
+    <file>icons/save_image.png</file>
+  </qresource>
+</RCC>
