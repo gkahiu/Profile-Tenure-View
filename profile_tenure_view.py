@@ -27,23 +27,23 @@ from PyQt4.QtGui import (
     QFont,
     QFontMetrics,
     QGraphicsItem,
-    QGraphicsRectItem,
+    QGraphicsLineItem,
     QGraphicsScene,
+    QGraphicsTextItem,
     QGraphicsView,
     QGridLayout,
     QImage,
     QLinearGradient,
+    QKeyEvent,
     QPainter,
     QPainterPath,
-    QPaintEvent,
-    QPalette,
     QPen,
     QPolygonF,
     QTextLayout,
     QWidget
 )
 from PyQt4.QtCore import (
-    QChar,
+    pyqtSignal,
     QFile,
     QIODevice,
     QLineF,
@@ -56,40 +56,46 @@ from PyQt4.QtCore import (
 )
 
 
-class ArrowItem(object):
+class Arrow(QGraphicsLineItem):
     """
-    Renders an arrow object (with line and arrow head) from one point to
+    Renders an arrow object (with line and arrow head) from one item to
     another. The arrow head size can be customized by specifying the angle
     and width of the arrow base.
     """
-    def __init__(self, start_point, end_point, base_width=None,
-                 tip_angle=None, fill_arrow_head=False):
+    def __init__(self, start_item, end_item, base_width=None,
+                 tip_angle=None, fill_arrow_head=True,
+                 parent_item=None, scene=None):
         """
         Class constructor
-        :param start_point: Arrow start point.
-        :type start_point: QPointF
-        :param end_point: Arrow end point.
-        :type end_point: QPointF
+        :param start_point: Arrow start item.
+        :type start_point: BaseTenureItem
+        :param end_point: Arrow end item.
+        :type end_point: BaseTenureItem
         :param base_width: Width (in pixels) of the arrow base. If not
-        specified, it defaults to 20.0.
+        specified, it defaults to 9.0.
         :type base_width: float
         :param tip_angle: Angle (in radians) between the two line components
         at the tip of the arrow. If not specified, it defaults to
-        math.radians(40.0).
+        math.radians(50.0).
         Minimum math.radians(10.0)
         Maximum math.radians(<90.0)
         :type tip_angle: float
         :param fill_arrow_head: True to close and fill the arrow head with
         the specified pen and brush settings. Defaults to False.
         :type fill_arrow_head: bool
+        :param parent_item: Parent item.
+        :type parent_item: QGraphicsItem
+        :param scene: Scene object.
+        :type scene: QGraphicsScene
         """
-        self._start_point = start_point
-        self._end_point = end_point
-        self._line = QLineF(self._start_point, self._end_point)
+        super(Arrow, self).__init__(parent_item, scene)
+
+        self._start_item = start_item
+        self._end_item = end_item
 
         self.base_width = base_width
         if self.base_width is None:
-            self.base_width = 7
+            self.base_width = 9.0
 
         self._angle = tip_angle
         if tip_angle is None:
@@ -97,16 +103,34 @@ class ArrowItem(object):
 
         self.fill_arrow_head = fill_arrow_head
 
-        self.pen = QPen(
-            Qt.black,
-            0,
-            Qt.SolidLine,
-            Qt.RoundCap,
-            Qt.MiterJoin
+        self.setPen(
+            QPen(
+                Qt.black,
+                1,
+                Qt.SolidLine,
+                Qt.RoundCap,
+                Qt.MiterJoin
+            )
         )
         self.brush = QBrush(Qt.black)
 
-        self._arrow_points = []
+        self._arrow_head_points = []
+
+    @property
+    def start_item(self):
+        """
+        :return: Returns the start item for the arrow.
+        :rtype: BaseTenureItem
+        """
+        return self._start_item
+
+    @property
+    def end_item(self):
+        """
+        :return: Returns the end item for the arrow.
+        :rtype: BaseTenureItem
+        """
+        return self._end_item
 
     @property
     def start_point(self):
@@ -114,7 +138,7 @@ class ArrowItem(object):
         :return: Returns the arrow start point.
         :rtype: QPointF
         """
-        return self._start_point
+        return self._start_item.pos()
 
     @property
     def end_point(self):
@@ -122,15 +146,31 @@ class ArrowItem(object):
         :return: Returns the arrow end point.
         :rtype: QPointF
         """
-        return self._end_point
+        return self._end_item.pos()
 
-    @property
-    def line(self):
+    def boundingRect(self):
+        extra = (self.base_width + self.pen().widthF()) / 2.0
+        p1 = self.line().p1()
+        p2 = self.line().p2()
+
+        rect = QRectF(
+            p1, QSizeF(p2.x() - p1.x(), p2.y() - p1.y())
+        ).normalized().adjusted(-extra, -extra, extra, extra)
+
+        return rect
+
+    def arrow_head_polygon(self):
         """
-        :return: Returns the line component of the arrow.
-        :rtype: QLineF
+        :return: Returns the arrow head as a QPolygonF object.
+        :rtype: QPolygonF
         """
-        return self._line
+        return QPolygonF(self._arrow_head_points)
+
+    def shape(self):
+        path = super(Arrow, self).shape()
+        path.addPolygon(self.arrow_head_polygon())
+
+        return path
 
     @property
     def angle(self):
@@ -164,60 +204,88 @@ class ArrowItem(object):
         :return: Returns a collection of points used to draw the arrow head.
         :rtype: list(QPointF)
         """
-        return self._arrow_points
+        return self._arrow_head_points
 
-    def paint(self, widget, painter, event):
+    def update_position(self):
         """
-        Performs the painting of the arrow item.
-        :param widget: The calling parent widget.
-        :type widget: QWidget
-        :param painter: Painter object that has already been setup.
-        :type painter: QPainter
-        :param event: Paint event of the calling widget.
-        :type event: QPaintEvent
+        Updates the position of the line and arrowhead when the positions of
+        the start and end items change.
         """
-        if self._start_point == self._end_point:
+        line = QLineF(
+            self.mapFromScene(self.start_item.center()),
+            self.mapFromScene(self.end_item.center())
+        )
+        self.setLine(line)
+
+    def _intersection_point(self, item, reference_line):
+        #Computes the intersection point between the item's line segments
+        # with the reference line.
+        intersect_point = QPointF()
+
+        for l in item.line_segments():
+            intersect_type = l.intersect(reference_line, intersect_point)
+            if intersect_type == QLineF.BoundedIntersection:
+                return intersect_point
+
+        return None
+
+    def paint(self, painter, option, widget):
+        """
+        Draw the arrow item.
+        """
+        if self._start_item.collidesWithItem(self._end_item):
             return
 
-        arrow_length = self._line.length()
+        painter.setPen(self.pen())
+
+        center_line = QLineF(self.start_item.center(), self.end_item.center())
+
+        #Get intersection points
+        start_intersection_point = self._intersection_point(self._start_item, center_line)
+        end_intersection_point = self._intersection_point(self._end_item, center_line)
+
+        #Do not draw if there are no intersection points
+        if start_intersection_point is None or end_intersection_point is None:
+            return
+
+        arrow_line = QLineF(start_intersection_point, end_intersection_point)
+        self.setLine(arrow_line)
+
+        arrow_length = arrow_line.length()
 
         #Setup computation parameters
-        cnt_factor = (self.base_width/2.0)/(math.tan(self._angle/2.0) * arrow_length)
+        cnt_factor = (self.base_width / 2.0)/(
+            math.tan(self._angle / 2.0) * arrow_length
+        )
         cnt_point_delta = (self.base_width/2.0)/arrow_length
 
         #Get arrow base along the line
-        arrow_base_x = self._end_point.x() - (self._line.dx() * cnt_factor)
-        arrow_base_y = self._end_point.y() - (self._line.dy() * cnt_factor)
+        arrow_base_x = end_intersection_point.x() - (arrow_line.dx() * cnt_factor)
+        arrow_base_y = end_intersection_point.y() - (arrow_line.dy() * cnt_factor)
 
         #Get deltas to arrow points from centre point of arrow base
-        cnt_point_dx = -(self._line.dy() * cnt_point_delta)
-        cnt_point_dy = self._line.dx() * cnt_point_delta
+        cnt_point_dx = -(arrow_line.dy() * cnt_point_delta)
+        cnt_point_dy = arrow_line.dx() * cnt_point_delta
 
         #Compute absolute arrow positions
         A1 = QPointF(arrow_base_x - cnt_point_dx, arrow_base_y - cnt_point_dy)
         A2 = QPointF(arrow_base_x + cnt_point_dx, arrow_base_y + cnt_point_dy)
 
         #Update arrow points
-        self._arrow_points = [A1, A2, self._end_point]
+        self._arrow_head_points = [A1, A2, end_intersection_point]
 
-        painter.save()
+        #Draw main arrow line
+        painter.drawLine(arrow_line)
 
-        painter.setPen(self.pen)
-
-        painter.drawLine(self._line)
-
+        #Draw arrow head
         if not self.fill_arrow_head:
-            painter.drawLine(A1, self._end_point)
-            painter.drawLine(self._end_point, A2)
+            painter.drawLine(A1, end_intersection_point)
+            painter.drawLine(end_intersection_point, A2)
 
         else:
             painter.setPen(Qt.NoPen)
             painter.setBrush(self.brush)
-
-            arrow_poly = QPolygonF(self._arrow_points)
-            painter.drawPolygon(arrow_poly)
-
-        painter.restore()
+            painter.drawPolygon(self.arrow_head_polygon())
 
 
 class BaseIconRender(object):
@@ -335,7 +403,6 @@ class EntityIconRenderer(BaseIconRender):
 
             p.drawLine(h_sep)
 
-
         p.restore()
 
 
@@ -392,7 +459,7 @@ class TenureLinkRenderer(BaseIconRender):
         p.setPen(outline)
 
         #Set segment fill brush
-        seg_brush = QBrush(QColor('#C2E4F8'))
+        seg_brush = QBrush(QColor('#ECF8FF'))
         p.setBrush(seg_brush)
 
         #Draw link segment
@@ -433,6 +500,8 @@ class BaseTenureItem(QGraphicsItem):
 
         #Renderer for header icon
         self.icon_renderer = kwargs.get('icon_renderer', None)
+
+        self.arrows = []
 
         self.pen = QPen(
             Qt.black,
@@ -498,6 +567,34 @@ class BaseTenureItem(QGraphicsItem):
 
     def type(self):
         return BaseTenureItem.Type
+
+    def remove_arrow(self, arrow):
+        """
+        Removes an arrow from the collection.
+        :param arrow: Arrow item.
+        :type arrow: Arrow
+        """
+        try:
+            self.arrows.remove(arrow)
+        except ValueError:
+            pass
+
+    def remove_arrows(self):
+        """
+        Removes all arrows associated with this item and related item.
+        """
+        for ar in self.arrows[:]:
+            ar.start_item.remove_arrow(ar)
+            ar.end_item.remove_arrow(ar)
+            self.scene().removeItem(ar)
+
+    def add_arrow(self, arrow):
+        """
+        Adds arrow item to the collection.
+        :param arrow: Arrow item.
+        :type arrow: Arrow
+        """
+        self.arrows.append(arrow)
 
     def boundingRect(self):
         extra = self.pen.widthF() / 2.0
@@ -577,6 +674,7 @@ class BaseTenureItem(QGraphicsItem):
         :type entity: Entity
         """
         self._entity = entity
+        self.prepareGeometryChange()
         self._on_set_entity()
 
     def _on_set_entity(self):
@@ -603,6 +701,53 @@ class BaseTenureItem(QGraphicsItem):
         of the item.
         """
         return float(self._height + self.shadow_thickness)
+
+    def scene_bounding_rect(self):
+        """
+        :return: Returns the bounding rect of the primary item in scene
+        coordinates, this does not include the shadow thickness.
+        :rtype: QRectF
+        """
+        local_start_point = QPointF(self._start_pos, self._start_pos)
+        scene_start_point = self.mapToScene(local_start_point)
+
+        return QRectF(scene_start_point, QSizeF(self._side, self._height))
+
+    def center(self):
+        """
+        :return: Returns the center point of the item in scene coordinates.
+        :rtype: QPointF
+        """
+        return self.scene_bounding_rect().center()
+
+    def line_segments(self):
+        """
+        :return: Returns a list of QLineF objects that constitute the scene
+        bounding rect. The line segments are in scene coordinates.
+        :rtype: QRectF
+        """
+        lines = []
+
+        rect = self.scene_bounding_rect()
+        poly = QPolygonF(rect)
+
+        for i, p in enumerate(poly):
+            if i == len(poly) - 1:
+                break
+
+            p1 = poly[i]
+
+            #Close to first point if the last item is reached
+            if i + 1 == len(poly):
+                p2 = poly[0]
+            else:
+                p2 = poly[i + 1]
+
+            #Construct line object
+            line = QLineF(p1, p2)
+            lines.append(line)
+
+        return lines
 
     def _elided_text(self, font, text, width):
         #Returns elided version of the text if greater than the width
@@ -987,6 +1132,104 @@ class TenureDocumentItem(BaseTenureItem):
             self.update()
 
 
+class Annotation(QGraphicsTextItem):
+    """Add major or minor annotation item to the view. The only difference
+    between major and minor annotations is the font size and underline
+    (for the former)."""
+    Minor, Major = range(2)
+
+    lost_focus = pyqtSignal(QGraphicsTextItem)
+
+    def __init__(self, parent=None, scene=None, size=0):
+        super(Annotation, self).__init__(parent, scene)
+
+        self.setFlag(QGraphicsItem.ItemIsMovable)
+        self.setFlag(QGraphicsItem.ItemIsSelectable)
+
+        self.size = size
+        self.setDefaultTextColor(Qt.black)
+
+        font = 'Consolas'
+
+        #Set font size
+        if self.size == Annotation.Minor:
+            self.setFont(QFont(font, 10, 50))
+
+        else:
+            font = QFont(font, 14, 75)
+            font.setUnderline(True)
+            self.setFont(font)
+
+    def focusOutEvent(self, event):
+        #Disable text interaction
+        self.setTextInteractionFlags(Qt.NoTextInteraction)
+        self.lost_focus.emit(self)
+        super(Annotation, self).focusOutEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        #Enable text interaction
+        if self.textInteractionFlags() == Qt.NoTextInteraction:
+            self.setTextInteractionFlags(Qt.TextEditorInteraction)
+
+        super(Annotation, self).mouseDoubleClickEvent(event)
+
+
+class ProfileTenureScene(QGraphicsScene):
+    """
+    Custom scene for handling annotation items.
+    """
+    InsertMajorAnnotation, InsertMinorAnnotation, MoveItem = range(3)
+
+    annotation_inserted = pyqtSignal(QGraphicsTextItem)
+
+    def __init__(self, parent=None):
+        super(ProfileTenureScene, self).__init__(parent)
+
+        self.mode = ProfileTenureScene.InsertMajorAnnotation
+
+    def editor_lost_focus(self, item):
+        """
+        Check if the annotation item is empty and delete if it is.
+        :param item: Annotation item.
+        :type item: QGraphicsTextItem
+        """
+        cursor = item.textCursor()
+        cursor.clearSelection()
+        item.setTextCursor(cursor)
+
+        if not item.toPlainText():
+            self.removeItem(item)
+            item.deleteLater()
+
+    def mousePressEvent(self, event):
+        """
+        Handles insert of annotation item.
+        :param event: Mouse press event.
+        :type event: QGraphicsSceneMouseEvent
+        """
+        if event.button() != Qt.LeftButton:
+            return
+
+        if self.mode == ProfileTenureScene.InsertMajorAnnotation:
+            sz = Annotation.Major
+            self._insert_annotation_item(sz, event.scenePos())
+        elif self.mode == ProfileTenureScene.InsertMinorAnnotation:
+            sz = Annotation.Minor
+            self._insert_annotation_item(sz, event.scenePos())
+
+        super(ProfileTenureScene, self).mousePressEvent(event)
+
+    def _insert_annotation_item(self, size, scene_pos):
+        #Insert major or minor annotation based on size
+        annotation = Annotation(size=size)
+        annotation.setTextInteractionFlags(Qt.TextEditorInteraction)
+        annotation.setZValue(1000.0)
+        annotation.lost_focus.connect(self.editor_lost_focus)
+        self.addItem(annotation)
+        annotation.setPos(scene_pos)
+        self.annotation_inserted.emit(annotation)
+
+
 class ProfileTenureView(QGraphicsView):
     """
     A widget for rendering a profile's social tenure relationship. It also
@@ -1009,8 +1252,7 @@ class ProfileTenureView(QGraphicsView):
         self.profile = profile
 
         scene_rect = QRectF(0, 0, 960, 540)
-
-        scene = QGraphicsScene(self)
+        scene = ProfileTenureScene(self)
         scene.setItemIndexMethod(QGraphicsScene.NoIndex)
         scene.setSceneRect(scene_rect)
 
@@ -1019,6 +1261,9 @@ class ProfileTenureView(QGraphicsView):
         self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
 
         self.setScene(scene)
+
+        #Connect signals
+        scene.annotation_inserted.connect(self.annotation_inserted)
 
         #Add items to view
         self.scene().addItem(self._default_party_item)
@@ -1034,6 +1279,17 @@ class ProfileTenureView(QGraphicsView):
 
         #Ensure vertical scroll is at the top
         self.centerOn(480.0, 20.0)
+
+        #Link social tenure item to supporting documents item
+        self.add_arrow(self._supporting_doc_item, self._str_item)
+
+    def annotation_inserted(self, item):
+        """
+        Slot raised when an annotation item has been inserted.
+        :param item: Annotation item.
+        :type item: Annotation
+        """
+        self.scene().mode = ProfileTenureScene.MoveItem
 
     @property
     def profile(self):
@@ -1065,6 +1321,72 @@ class ProfileTenureView(QGraphicsView):
 
         self._update_profile()
 
+    def add_party_entity(self, party):
+        """
+        Adds a party entity to the view. If there is a existing one with the
+        same name then it will be removed before adding this party.
+        :param party: Party entity.
+        :type party: Entity
+        """
+        if party.short_name in self._party_items:
+            self.remove_party(party.short_name)
+
+        #Hide default party placeholder
+        self._default_party_item.hide()
+
+        p_item = EntityItem()
+        p_item.entity = party
+        self.scene().addItem(p_item)
+
+        if len(self._party_items) == 0:
+            p_item.setPos(200, 20)
+        else:
+            self.auto_position(p_item)
+
+        #Add to collection
+        self._party_items[party.short_name] = p_item
+
+        #Add connection arrow to social tenure item
+        self.add_arrow(p_item, self._str_item)
+
+    def auto_position(self, item):
+        """
+        Automatically positions the party item to prevent it from overlapping
+        the others.
+        :param item: Party entity item.
+        :type item: EntityItem
+        """
+        pass
+
+    def remove_party(self, name):
+        """
+        Removes the party with the specified name from the collection.
+        :param name: Party name
+        :return: Returns True if the operation succeeded, otherwise False if
+        the party with the specified name does not exist in the collection.
+        :rtype: bool
+        """
+        if not name in self._party_items:
+            return False
+
+        p_item = self._party_items.pop(name)
+        self.scene().removeItem(p_item)
+
+        del p_item
+
+        #Show default party item
+        if len(self._party_items) == 0:
+            self._default_party_item.show()
+
+        return True
+
+    def invalidate_spatial_unit(self):
+        """
+        Clears the spatial unit entity.
+        """
+        self._sp_item.invalidate()
+        self._sp_item.remove_arrows()
+
     def set_spatial_unit(self, spatial_unit):
         """
         Set the spatial unit entity.
@@ -1072,9 +1394,49 @@ class ProfileTenureView(QGraphicsView):
         profile's STR relationship.
         :type spatial_unit: Entity
         """
+        if spatial_unit is None:
+            return
+
         self._sp_item.entity = spatial_unit
 
-        self._sp_item.update()
+        #Add arrow linking social tenure to spatial unit item
+        self.add_arrow(self._str_item, self._sp_item)
+
+    def add_arrow(self, start_item, end_item, **kwargs):
+        """
+        Adds an arrow item running from the start to the end item.
+        :param start_item: Start item for the arrow.
+        :type start_item: BaseTenureItem
+        :param end_item: End item for the arrow.
+        :type end_item: BaseTenureItem
+        :param kwargs: Optional arrow arguments such as angle, base width
+        etc. See arguments for the Arrow class.
+        :type kwargs: dict
+        """
+        arrow = Arrow(start_item, end_item, **kwargs)
+        start_item.add_arrow(arrow)
+        end_item.add_arrow(arrow)
+        arrow.setZValue(100.0)
+        self.scene().addItem(arrow)
+        arrow.update_position()
+
+    def keyPressEvent(self, event):
+        """
+        Capture delete key to remove selected annotation items.
+        :param event: Key event.
+        :type event: QKeyEvent
+        """
+        if event.key() == Qt.Key_Delete:
+            self._delete_selected_annotation_items()
+
+        super(ProfileTenureView, self).keyPressEvent(event)
+
+    def _delete_selected_annotation_items(self):
+        #Deletes selected annotation items in the scene
+        for item in self.scene().selectedItems():
+            if isinstance(item, Annotation):
+                self.scene().removeItem(item)
+                item.deleteLater()
 
     def save_image_to_file(self, path, resolution=96):
         """
@@ -1173,11 +1535,26 @@ class ProfileTenureView(QGraphicsView):
     def sizeHint(self):
         return QSize(560, 315)
 
+
+class Entity(object):
+    def __init__(self, name):
+        self.short_name = name
+        self.columns = {}
+
 if __name__ == '__main__':
     app = QApplication(sys.argv)
 
     test_win = QWidget()
     tenure_view = ProfileTenureView()
+
+    #Party entities
+    p1 = Entity('Farmer')
+    p1.columns['first_name'] = 'FN'
+    p1.columns['last_name'] = 'ln'
+    p1.columns['gender'] = 'gen'
+    p1.columns['registration_number'] = 'rn'
+
+    tenure_view.add_party_entity(p1)
 
     #Test image
     p = 'D:/Temp/STR_Image.png'
