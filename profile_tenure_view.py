@@ -1585,6 +1585,7 @@ class ProfileTenureDiagram(QWidget):
         )
 
         self._setup_widgets()
+        self._current_zoom_factor = 1.0
 
     def scene_mode(self):
         """
@@ -1732,7 +1733,13 @@ class ProfileTenureDiagram(QWidget):
 
         #TODO: Remove conversion from QVariant
         factor, status = self.zoom_cbo.itemData(idx).toFloat()
-        self.scale(factor)
+
+        #Compute relative scale
+        scale = factor / self._current_zoom_factor
+        self.scale(scale)
+        self._current_zoom_factor = factor
+
+        print scale
 
     def scale(self, factor):
         """
