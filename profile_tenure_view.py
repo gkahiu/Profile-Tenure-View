@@ -1739,8 +1739,6 @@ class ProfileTenureDiagram(QWidget):
         self.scale(scale)
         self._current_zoom_factor = factor
 
-        print scale
-
     def scale(self, factor):
         """
         Scales the view by the given scale factor.
